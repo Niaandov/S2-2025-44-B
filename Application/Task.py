@@ -40,9 +40,7 @@ class Task(ABC):
         self.renderTaskComponents()
         pass
 
-    def causeError(self):
-        # Does this work? Does this make sense, I'll never tell~
-        return self.errorRate + random.uniform(-0.25, 0.25) <= random.uniform(0.0,1.0)
+
 
 
 
