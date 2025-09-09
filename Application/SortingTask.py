@@ -1,5 +1,8 @@
 import random
 
+from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QLabel, QFrame
+
 from Task import Task
 
 class SortingTask(Task):
@@ -8,12 +11,16 @@ class SortingTask(Task):
         self._speed = speed
         self.numColours = numColours
         self.boxList = []
-        self.errorDict = {}
+
+        self.programState = 0
+        self.previousState = 0
 
         self.redError = 0
         self.blueError = 0
         if self.numColours > 2:
             self.greenError = 0
+
+        self.renderWindow = sortingTaskWindow(240,240,240)
 
 
     @property
@@ -35,7 +42,8 @@ class SortingTask(Task):
 
     def createNewBox(self):
         self.boxList.append(self.getRandomColour())
-        print(self.boxList)
+        self.renderWindow.updateText(str(len(self.boxList)))
+        self.programState = 1
 
 
     def advBoxQueue(self):
@@ -53,9 +61,27 @@ class SortingTask(Task):
 
         print(self.boxList)
         self.boxList.pop(0)
+        self.renderWindow.updateText(str(len(self.boxList)))
+        self.programState = 0
+
+    def startTask(self):
+
+        for i in range(3):
+            self.createNewBox()
+
+        self.stateTimer = QTimer()
+        self.stateTimer.timeout.connect(self.nextState)
+        self.stateTimer.start(self._speed)
 
 
-
+    def nextState(self):
+        match self.programState:
+            case 0:
+                self.createNewBox()
+            case 1:
+                self.advBoxQueue()
+            case 2:
+                print("Something Special Coming Soon (it's the interrupt state)")
 
         # Some rendering anim goes here.
         # Probable process is:
@@ -65,9 +91,6 @@ class SortingTask(Task):
             # Move box into the right hub
             # Enable box sprite in the hub
             # Colour is decided by current thing
-
-    def renderTaskComponents(self):
-        pass
 
 
     def getRandomColour(self):
@@ -91,5 +114,32 @@ class SortingTask(Task):
     def causeError(self):
         # Does this work? Does this make sense, I'll never tell~
         return self._errorRate + random.uniform(-0.05, 0.05) >= random.uniform(0.0,1.0)
+
+
+class sortingTaskWindow(QFrame):
+    def __init__(self, minWidth, minHeight, maxHeight):
+        super().__init__()
+
+        self.setObjectName("sortingTask")
+        self.setStyleSheet("""QFrame { border: 1px solid #d0d0d0; border-radius: 5px; background: #fafafa;}
+        QLabel { font-size: 4vmin;}
+        QPushButton { padding: 4px 8px;}""")
+
+        self.setMinimumSize(minWidth, minHeight)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12,12,12,12)
+        root.setSpacing(8)
+
+        self.testText = QLabel("Exp")
+        root.addWidget(self.testText)
+
+
+
+    def updateText(self, text):
+        self.testText.setText(text)
+        self.testText.repaint()
+
 
 
