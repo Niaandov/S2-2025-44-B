@@ -1,7 +1,8 @@
 import random
 
 from PyQt5.QtCore import QTimer
-from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QLabel, QFrame
+from PyQt5.QtGui import QBrush, QColor, QPen
+from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QLabel, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem
 
 from Task import Task
 
@@ -20,7 +21,8 @@ class SortingTask(Task):
         if self.numColours > 2:
             self.greenError = 0
 
-        self.renderWindow = sortingTaskWindow(240,240,240)
+
+        self.renderWindow = sortingTaskWindow(960,1080,1080)
 
 
     @property
@@ -42,7 +44,6 @@ class SortingTask(Task):
 
     def createNewBox(self):
         self.boxList.append(self.getRandomColour())
-        self.renderWindow.updateText(str(len(self.boxList)))
         self.programState = 1
 
 
@@ -61,7 +62,6 @@ class SortingTask(Task):
 
         print(self.boxList)
         self.boxList.pop(0)
-        self.renderWindow.updateText(str(len(self.boxList)))
         self.programState = 0
 
     def startTask(self):
@@ -132,14 +132,31 @@ class sortingTaskWindow(QFrame):
         root.setContentsMargins(12,12,12,12)
         root.setSpacing(8)
 
-        self.testText = QLabel("Exp")
-        root.addWidget(self.testText)
+
+        scene = QGraphicsScene(self)
+        scene.setBackgroundBrush(QBrush(QColor(105, 105, 105)))
+        scene.setSceneRect(0,0, 1920 ,int(minHeight / 2))
+
+        conveyor = QGraphicsRectItem(0, int((minHeight / 2) - 50), 1920, int(minHeight / 4))
+        conveyor.setBrush(QBrush(QColor(255, 0, 0)))
+
+        scene.addItem(conveyor)
+
+        viewport = QGraphicsView(scene)
+        viewport.setInteractive(False)
+        viewport.setFixedSize(1920,1080)
+
+        root.addWidget(viewport)
 
 
 
-    def updateText(self, text):
-        self.testText.setText(text)
-        self.testText.repaint()
 
+
+
+
+
+    def createNewBox(self, colour):
+        # something
+        1+1
 
 

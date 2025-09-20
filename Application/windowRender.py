@@ -112,7 +112,7 @@ class testWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Monitoring Window")
-        self.resize(1100, 700)
+        self.resize(1920, 1080)
 
         self.sTask = SortingTask(0.25,1000,3)
 
@@ -121,7 +121,7 @@ class testWindow(QMainWindow):
         top_l = QHBoxLayout(top)
         top_l.setContentsMargins(8,8,8,8)
 
-        self.grid = taskGrid(240,12,12)
+        self.grid = taskGrid(1920,12,12)
 
         root = QWidget()
         root_l = QVBoxLayout(root)
@@ -210,4 +210,21 @@ process)
 
 
 Currently, timer process is stored on the individual task, so timers can run seperately. Will need to thread tasks
+
+20/09/2025
+Rendering is fun, I lied effortlessly.
+
+Using QGraphics for it, meaning that I have to learn how to anim components which may have to be done on a seperate timer
+Resizing is extremely annoying due to the way that this works, essentially I have to figure out how to restrict it from
+having a scrollable area because it really wants to be dynamic in a way we cant let it
+
+It also is statically sized by PIXELS. everything in it is fucking static. Which is great but the second the screen is resized we have to
+redo every fucking calculation. FUN.fuckkk i hate UI
+
+Question for next time
+* Does resizing have to be done dynamically or can we implement an option to select window size manually between several
+common resolution sizes? 
+
+You know like in a video game. Because the alternative is I get to have a fun minigame while coding where I get to try
+to avoid blowing my fucking brains out. 
 '''
