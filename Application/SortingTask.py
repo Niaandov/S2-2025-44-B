@@ -43,8 +43,14 @@ class SortingTask(Task):
 
 
     def createNewBox(self):
-        self.boxList.append(self.getRandomColour())
+        colour = self.getRandomColour()
+        self.boxList.append(colour)
+        self.renderWindow.animState = 0
         self.programState = 1
+        self.renderWindow.renderNewBox(colour)
+
+
+
 
 
     def advBoxQueue(self):
@@ -60,24 +66,31 @@ class SortingTask(Task):
                     self.greenError += 1
                     print(self.greenError)
 
+        self.renderWindow.checkSortBox()
+
         print(self.boxList)
         self.boxList.pop(0)
         self.programState = 0
+        self.renderWindow.animState = 1
 
     def startTask(self):
 
-        for i in range(3):
+        for i in range(1):
             self.createNewBox()
 
         self.stateTimer = QTimer()
         self.stateTimer.timeout.connect(self.nextState)
         self.stateTimer.start(self._speed)
 
+        self.renderWindow.startStuff(self._speed)
+
+
 
     def nextState(self):
         match self.programState:
             case 0:
                 self.createNewBox()
+
             case 1:
                 self.advBoxQueue()
             case 2:
@@ -125,6 +138,9 @@ class sortingTaskWindow(QFrame):
         QLabel { font-size: 4vmin;}
         QPushButton { padding: 4px 8px;}""")
 
+        self.minHeight = minHeight
+        self.minWidth = minWidth
+
         self.setMinimumSize(minWidth, minHeight)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
@@ -133,30 +149,80 @@ class sortingTaskWindow(QFrame):
         root.setSpacing(8)
 
 
-        scene = QGraphicsScene(self)
-        scene.setBackgroundBrush(QBrush(QColor(105, 105, 105)))
-        scene.setSceneRect(0,0, 1920 ,int(minHeight / 2))
+        self.scene = QGraphicsScene(self)
+        self.scene.setBackgroundBrush(QBrush(QColor(105, 105, 105)))
+        self.scene.setSceneRect(0,0, 1920 ,int(minHeight / 2))
 
         conveyor = QGraphicsRectItem(0, int((minHeight / 2) - 50), 1920, int(minHeight / 4))
-        conveyor.setBrush(QBrush(QColor(255, 0, 0)))
+        conveyor.setBrush(QBrush(QColor(155, 155, 155)))
+        conveyor.setZValue(1)
 
-        scene.addItem(conveyor)
+        self.scene.addItem(conveyor)
 
-        viewport = QGraphicsView(scene)
+
+        viewport = QGraphicsView(self.scene)
         viewport.setInteractive(False)
         viewport.setFixedSize(1920,1080)
 
         root.addWidget(viewport)
 
+        self.boxArray = []
+        self.blueBox = None
+        self.greenBox = None
+        self.redBox = None
+
+        # Anim State:
+            # 0 = Move box along line
+            # 1 = Move Arm to box position
+            # 2 = Move Arm to appropriate box
+            # 3 = General interrupt if needed
+        self.animState = 0
+        self.animTimer = QTimer()
+        self.animTimer.timeout.connect(self.doAnimationStep)
+
+        self.distToHalfway = 0
+
+    def startStuff(self, speed):
+        self.animTimer.start(50)
+
+        # Calculates the dist per step required to get to the halfway point for the arm
+            # (Width / 2 ) / ( Total Steps )
+                # (Width / 2) / (speed / timestep [50])
+        self.distToHalfway = int(self.minWidth / (speed / 50))
+
+    def renderNewBox(self, colour):
+        tempItem = QGraphicsRectItem(0,int((self.minHeight / 2) - 50 + (( self.minHeight / 4 ) / 24)), int(self.minHeight/4) - 20, int(self.minHeight / 4) - 20 )
+        tempItem.setBrush(QBrush(QColor(colour)))
+        tempItem.setZValue(500)
+        self.boxArray.append(tempItem)
+        self.scene.addItem(tempItem)
+
+    def moveBox(self, disToMovePerMil):
+        for box in self.boxArray:
+            box.setX(box.x() + disToMovePerMil)
 
 
+    def killBox(self):
+        self.scene.removeItem(self.boxArray[0])
+        self.boxArray.pop(0)
 
 
+    def doAnimationStep(self):
+        match self.animState:
+            case 0:
+                self.moveBox(self.distToHalfway)
+            case 1:
+                self.placeholder()
+
+    def placeholder(self):
+        self.boxArray[0].setRotation(self.boxArray[0].rotation() + 20)
+        self.greenBox = self.boxArray[0]
 
 
+    def checkSortBox(self):
+        if self.greenBox != None:
+            self.scene.removeItem(self.greenBox)
+            self.killBox()
 
-    def createNewBox(self, colour):
-        # something
-        1+1
 
 

@@ -1,6 +1,9 @@
 import random
 from abc import ABC, abstractmethod
 
+from PyQt5.QtWidgets import QGraphicsItem
+
+
 class Task(ABC):
 
     @property
@@ -27,8 +30,6 @@ class Task(ABC):
     @abstractmethod
     def advBoxQueue(self):
         pass
-
-
 
 
 
