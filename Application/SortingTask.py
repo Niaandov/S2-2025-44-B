@@ -2,7 +2,7 @@ import random
 
 from PyQt5.QtCore import QTimer, QRect, Qt
 from PyQt5.QtGui import QBrush, QColor, QPen
-from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QLabel, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem
+from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QLabel, QPushButton
 
 from Task import Task
 
@@ -24,8 +24,12 @@ class SortingTask(Task):
         if self.numColours > 2:
             self.greenError = 0
 
+        self.errorBox = None
+        self.correctBox = None
+
 
         self.renderWindow = sortingTaskWindow(1920,1080,self, self.numColours)
+        self.renderWindow.speed = self._speed
 
 
     @property
@@ -35,6 +39,7 @@ class SortingTask(Task):
     @speed.setter
     def speed(self, value):
         self._speed = value
+        self.renderWindow.speed = value
 
     @property
     def errorRate(self):
@@ -91,7 +96,7 @@ class SortingTask(Task):
 
         print(boxLocation)
 
-        self.renderWindow.checkSortBox(boxLocation, self._speed)
+        self.renderWindow.checkSortBox(boxLocation)
 
         print(self.boxList)
         self.renderWindow.animState = 1
@@ -100,10 +105,6 @@ class SortingTask(Task):
 
         for i in range(1):
             self.createNewBox()
-
-        #self.stateTimer = QTimer()
-        #self.stateTimer.timeout.connect(self.nextState)
-        #self.stateTimer.start(self._speed)
 
         self.renderWindow.startStuff(self._speed)
 
@@ -129,6 +130,29 @@ class SortingTask(Task):
                 return "blue"
 
 
+    def defineErrorBox(self, boxColour):
+        self.errorBox = boxColour
+
+        print(boxColour)
+
+        if self.correctBox is not None:
+            self.correctionInterrupt()
+
+    def defineCorrectionBox(self, boxColour):
+        self.correctBox = boxColour
+
+        print(boxColour)
+
+        if self.errorBox is not None:
+            self.correctionInterrupt()
+
+    def correctionInterrupt(self):
+            self.renderWindow.errorColour = self.errorBox
+            self.renderWindow.correctColour = self.correctBox
+            self.renderWindow.interrupt = True
+
+
+
     def causeError(self):
         # Does this work? Does this make sense, I'll never tell~
         error = self._errorRate + random.uniform(-0.05, 0.05) >= random.uniform(0.0,1.0)
@@ -148,15 +172,12 @@ class sortingTaskWindow(QFrame):
         QLabel { font-size: 4vmin;}
         QPushButton { padding: 4px 8px;}""")
 
-
-
         self.setMinimumSize(minWidth, minHeight)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12,12,12,12)
         root.setSpacing(8)
-
 
         ##################
         ## RENDER LOGIC ##
@@ -219,6 +240,8 @@ class sortingTaskWindow(QFrame):
             self.greenX = centreScreenBox
             self.greenY = self.conveyorHeight
 
+
+
         # Move to Box varaibles
         # Target is the target x/y for comparison
         # add x/y is the same as distToHalfway
@@ -243,6 +266,7 @@ class sortingTaskWindow(QFrame):
         self.greenSB = None
         self.redSB = None
         self.toDestroyBox = None
+        self.heldBox = None
 
         # Anim State:
             # 0 = Move box along line
@@ -254,6 +278,65 @@ class sortingTaskWindow(QFrame):
         self.animTimer.timeout.connect(self.doAnimationStep)
 
         self.distToHalfway = 0
+        self.priorState = None
+        self.interrupt = False
+        self.errorColour = None
+        self.correctedColour = None
+        self.speed = None
+
+        ############
+        # Controls #
+        ############
+        errorLabel = QLabel("Box With Error")
+        errorLabel.setAlignment(Qt.AlignCenter)
+        root.addWidget(errorLabel)
+
+        errorLayout = QHBoxLayout(self)
+        redErrorButton = QPushButton("Red")
+        redErrorButton.setStyleSheet("background-color: red")
+
+        redErrorButton.clicked.connect(lambda: self.taskParent.defineErrorBox("red"))
+
+        errorLayout.addWidget(redErrorButton)
+        blueErrorButton = QPushButton("Blue")
+        blueErrorButton.setStyleSheet("background-color: blue")
+
+        blueErrorButton.clicked.connect(lambda: self.taskParent.defineErrorBox("blue"))
+
+        errorLayout.addWidget(blueErrorButton)
+        greenErrorButton = QPushButton("Green")
+        greenErrorButton.setStyleSheet("background-color: green")
+
+        greenErrorButton.clicked.connect(lambda: self.taskParent.defineErrorBox("green"))
+
+        errorLayout.addWidget(greenErrorButton)
+        root.addLayout(errorLayout)
+
+
+        correctionLabel = QLabel("Correct Box")
+        correctionLabel.setAlignment(Qt.AlignCenter)
+        root.addWidget(correctionLabel)
+
+        correctionLayout = QHBoxLayout(self)
+        redCorrectionButton = QPushButton("Red Correction")
+        redCorrectionButton.setStyleSheet("background-color: red")
+        correctionLayout.addWidget(redCorrectionButton)
+
+        redCorrectionButton.clicked.connect(lambda: self.taskParent.defineCorrectionBox("red"))
+
+        blueCorrectionButton = QPushButton("Blue Correction")
+        blueCorrectionButton.setStyleSheet("background-color: blue")
+        correctionLayout.addWidget(blueCorrectionButton)
+
+        blueCorrectionButton.clicked.connect(lambda: self.taskParent.defineCorrectionBox("blue"))
+
+        greenCorrectionButton = QPushButton("Green Correction")
+        greenCorrectionButton.setStyleSheet("background-color: green")
+
+        greenCorrectionButton.clicked.connect(lambda: self.taskParent.defineCorrectionBox("green"))
+
+        correctionLayout.addWidget(greenCorrectionButton)
+        root.addLayout(correctionLayout)
 
     def startStuff(self, speed):
         self.animTimer.start(50)
@@ -285,30 +368,90 @@ class sortingTaskWindow(QFrame):
 
         # Changes state once the box at the front of the conveyor reaches the halfway point
         if(self.boxArray[0].x() == self.sceneWidth / 2):
-            self.taskParent.advBoxQueue()
+            if not self.interrupt:
+                self.taskParent.advBoxQueue()
+            else:
+                self.animState = 2
+                self.priorState = 1
 
     def doAnimationStep(self):
         match self.animState:
             case 0:
                 self.moveBox(self.distToHalfway)
             case 1:
-                self.placeholder()
+                self.moveToTarget()
+            case 2:
+                self.moveToTarget()
 
-    def placeholder(self):
-        heldBox = self.boxArray[0]
-        heldBox.setX(heldBox.x() + self.addX)
-        heldBox.setY(heldBox.y() - self.addY)
+    def moveToTarget(self):
 
-        if abs(heldBox.y() / 2) >= self.targetY and abs(heldBox.x()) >= self.targetX or self.targetX == 463 and abs(heldBox.y() / 2) >= self.targetY and abs(heldBox.x()) <= self.targetX:
-           self.taskParent.createNewBox()
-           self.boxArray.pop(0)
-           self.taskParent.popBox()
+        self.heldBox.setX(self.heldBox.x() + self.addX)
+        self.heldBox.setY(self.heldBox.y() - self.addY)
+
+
+
+        if abs(self.heldBox.y() / 2) >= self.targetY and abs(self.heldBox.x()) >= self.targetX or self.targetX == 463 and abs(self.heldBox.y() / 2) >= self.targetY and abs(self.heldBox.x()) <= self.targetX:
+           if not self.interrupt:
+               self.taskParent.createNewBox()
+               self.boxArray.pop(0)
+               self.taskParent.popBox()
+           elif self.interrupt == True and self.priorState is not None:
+               self.animState = 2
+               self.correctBox(self.errorColour, self.correctedColour)
+               self.priorState = 0
+               print("Moving?")
+           else:
+               # Set state back
+               if self.priorState == 1:
+                   self.taskParent.advBoxQueue()
+               elif self.priorState == 0:
+                   self.taskParent.createNewBox()
+               self.priorState = None
+               self.interrupt = False
+               print("Moving?")
+
            if self.toDestroyBox is not None:
                self.scene.removeItem(self.toDestroyBox)
                self.toDestroyBox = None
 
+    def correctBox(self, currentBox, newBox):
+        # Probably better way to do this but w/e it's done only once so we can be slightly more inefficient
+        match newBox:
+            case "red":
+                self.targetX = self.redX
+                if self.redSB is not None:
+                    self.toDestroyBox = self.redSB
+                    #self.redSB = None
+            case "green":
+                self.targetX = self.greenX
+                if self.greenSB is not None:
+                    self.toDestroyBox = self.greenSB
+                    #self.greenSB = None
+            case "blue":
+                self.targetX = self.blueX
+                if self.blueSB is not None:
+                    self.toDestroyBox = self.blueSB
+                    #self.blueSB = None
 
-    def checkSortBox(self, colour, speed):
+        match currentBox:
+            case "red":
+                self.heldBox = self.redSB
+            case "green":
+                self.heldBox = self.greenSB
+            case "blue":
+                self.heldBox = self.blueSB
+
+
+
+        # Mainly placeholder until I can bother to work on proper animations. Animation in this stuff is difficult so Functionality Over Form for now
+        # AddY is 0 since we're moving from a box to box and theyre all on the same Y
+        self.addX = int(((self.targetX - int(self.sceneWidth / 2 - self.boxHeight / 2))) / (self.speed / 50))
+        self.addY = 0
+
+
+
+
+    def checkSortBox(self, colour):
         match(colour):
             case "blue":
                 self.targetX = self.blueX
@@ -338,8 +481,9 @@ class sortingTaskWindow(QFrame):
 
                 self.greenSB = self.boxArray[0]
 
-        self.addX = int(((self.targetX - int(self.sceneWidth / 2 - self.boxHeight / 2))) / (speed / 50))
-        self.addY = int(((self.conveyorTopLocation + self.conveyorHeight / 4) - self.targetY)  / (speed / 50))
+        self.heldBox = self.boxArray[0]
+        self.addX = int(((self.targetX - int(self.sceneWidth / 2 - self.boxHeight / 2))) / (self.speed / 50))
+        self.addY = int(((self.conveyorTopLocation + self.conveyorHeight / 4) - self.targetY)  / (self.speed / 50))
 
 
 
