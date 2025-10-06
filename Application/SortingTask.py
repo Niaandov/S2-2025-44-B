@@ -2,7 +2,7 @@ import random
 
 from PyQt5.QtCore import QTimer, QRect, Qt
 from PyQt5.QtGui import QBrush, QColor, QPen
-from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QLabel, QPushButton
+from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QLabel, QPushButton, QGraphicsTextItem
 
 from Task import Task
 
@@ -31,23 +31,6 @@ class SortingTask(Task):
         self.renderWindow = sortingTaskWindow(1920,1080,self, self.numColours)
         self.renderWindow.speed = self._speed
 
-
-    @property
-    def speed(self):
-        return self._speed
-
-    @speed.setter
-    def speed(self, value):
-        self._speed = value
-        self.renderWindow.speed = value
-
-    @property
-    def errorRate(self):
-        return self._errorRate
-
-    @errorRate.setter
-    def errorRate(self, value):
-        self._errorRate = value
 
 
     def createNewBox(self):
@@ -385,21 +368,27 @@ class sortingTaskWindow(QFrame):
 
     def moveToTarget(self):
 
+        # Sets the X/Y values to an incremement of their previous state
         self.heldBox.setX(self.heldBox.x() + self.addX)
         self.heldBox.setY(self.heldBox.y() - self.addY)
 
 
-
+        # Check if the box is:
+            # Slightly above or at TargetY and to the right of or at TargetX
+            # Slightly above or at TargetY and to the left of or at TargetX  
         if abs(self.heldBox.y() / 2) >= self.targetY and abs(self.heldBox.x()) >= self.targetX or self.targetX == 463 and abs(self.heldBox.y() / 2) >= self.targetY and abs(self.heldBox.x()) <= self.targetX:
+            # If we are not in the interrupt state then move to state 0 
            if not self.interrupt:
                self.taskParent.createNewBox()
                self.boxArray.pop(0)
                self.taskParent.popBox()
+            # If we are in the interrupt state and we have no recorded prior state (AKA, the interrupt hasn't finished)
            elif self.interrupt == True and self.priorState is not None:
                self.animState = 2
                self.correctBox(self.errorColour, self.correctedColour)
                self.priorState = 0
                print("Moving?")
+           # If we are in interrupt state and we have a recorded prior state, then clear the state 
            else:
                # Set state back
                if self.priorState == 1:
@@ -410,6 +399,7 @@ class sortingTaskWindow(QFrame):
                self.interrupt = False
                print("Moving?")
 
+           # Remove boxes that are hidden or not needed
            if self.toDestroyBox is not None:
                self.scene.removeItem(self.toDestroyBox)
                self.toDestroyBox = None
