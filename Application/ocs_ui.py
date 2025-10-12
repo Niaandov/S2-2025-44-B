@@ -261,12 +261,6 @@ class OCSWindow(QMainWindow):
         row_save.addWidget(self.session_edit, 1)
         row_save.addWidget(self.save_btn)
 
-        self.load_edit = QLineEdit(); self.load_edit.setPlaceholderText("Session File")
-        self.load_btn  = QPushButton("LOAD"); self.load_btn.clicked.connect(self.load_json_dialog)
-
-        row_load = QHBoxLayout(); row_load.setSpacing(10)
-        row_load.addWidget(self.load_edit, 1)
-        row_load.addWidget(self.load_btn)
 
         self.file_combo = QComboBox(); self.refresh_file_list()
         self.file_load_btn = QPushButton("File Load"); self.file_load_btn.clicked.connect(self.load_from_combo)
@@ -279,7 +273,6 @@ class OCSWindow(QMainWindow):
         rail.setSpacing(16)
         rail.addWidget(legend)
         rail.addLayout(row_save)
-        rail.addLayout(row_load)
         rail.addWidget(self.file_combo)
         rail.addWidget(self.file_load_btn)
         rail.addSpacing(10)
