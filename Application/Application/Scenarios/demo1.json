@@ -1,0 +1,32 @@
+{
+  "sortingTask": {
+    "active": false,
+    "speed": 1000,
+    "errorRate": 12,
+    "numColours": 3,
+    "distraction": [
+      false,
+      false
+    ]
+  },
+  "packagingTask": {
+    "active": false,
+    "speed": 8000,
+    "errorRate": 9,
+    "packageNum": 6,
+    "distraction": [
+      false,
+      false
+    ]
+  },
+  "inspectionTask": {
+    "active": false,
+    "speed": 8000,
+    "errorRate": 5,
+    "sizeRange": 10,
+    "distraction": [
+      false,
+      false
+    ]
+  }
+}

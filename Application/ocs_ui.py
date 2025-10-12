@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
-# Observer Control System – Columns UI (with controls & stats)
-# - Main class renamed to OCSWindow (per request)
-# - Start/Pause/Stop buttons
-# - File Load dropdown + Load button
-# - Placeholder statistics layout
-# - Same JSON schema & value mappings as before
+# Observer Control System – compact width + mid-page stats + clear gaps
+# JSON fields preserved:
+#   sortingTask:   active, speed, errorRate, numColours, distraction
+#   packagingTask: active, speed, errorRate, packageNum, distraction
+#   inspectionTask:active, speed, errorRate, sizeRange,  distraction
 
 import os, re, json, glob
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QLineEdit, QPushButton,
     QComboBox, QSlider, QCheckBox, QHBoxLayout, QVBoxLayout, QGridLayout,
-    QGroupBox, QMessageBox, QFrame, QFormLayout, QFileDialog
+    QGroupBox, QMessageBox, QFrame, QFormLayout, QFileDialog, QSizePolicy,
+    QScrollArea
 )
 
-# ---------- Config ----------
+# ---------------- constants / config ----------------
 FILENAME_REGEX = re.compile(r"^[A-Za-z0-9_-]+$")
-SAVE_WITH_EXTENSION = True
-
-# ---------- Mappings (unchanged spec) ----------
 SPEED_OPTIONS = [("Slow (8s)", 8000), ("Medium (4s)", 4000), ("Fast (1s)", 1000)]
 DISTRACTION_OPTIONS = {
     "None": [False, False],
@@ -26,52 +23,19 @@ DISTRACTION_OPTIONS = {
     "Light": [True, False],
     "Sound + Light": [True, True],
 }
-SORTING_COLOURS = [("2 Colours", 2), ("3 Colours", 3)]
-PACKAGING_SIZES = [("High (6 Items)", 6), ("Medium (5 Items)", 5), ("Low (4 Items)", 4)]
+SCENARIOS_DIR = os.path.join("Application", "Scenarios")  # <— required folder
 
-def combo_from_pairs(pairs):
-    cb = QComboBox()
-    for lbl, val in pairs:
-        cb.addItem(lbl, val)
-    return cb
+# Ensure the scenarios directory exists
+os.makedirs(SCENARIOS_DIR, exist_ok=True)
 
-def combo_from_dict(d):
-    cb = QComboBox()
-    for lbl, val in d.items():
-        cb.addItem(lbl, val)
-    return cb
-
-class Legend(QWidget):
-    """Left legend (title + G/Y/R squares) like the photo."""
-    def __init__(self):
-        super().__init__()
-        def sq(color):
-            f = QFrame(); f.setFixedSize(18, 18)
-            f.setStyleSheet(f"background:{color}; border:1px solid #999; border-radius:3px;")
-            return f
-        title = QLabel("Observer Control System")
-        title.setStyleSheet("font-weight:600; margin-bottom:6px;")
-        colors = QHBoxLayout()
-        colors.addWidget(sq("#4CAF50")); colors.addSpacing(8)
-        colors.addWidget(sq("#FFC107")); colors.addSpacing(8)
-        colors.addWidget(sq("#F44336"))
-        v = QVBoxLayout(self)
-        v.addWidget(title)
-        v.addLayout(colors)
-        v.addStretch(1)
-
-class Header(QWidget):
-    """Uppercase section title + Enable checkbox."""
-    def __init__(self, text):
-        super().__init__()
-        lbl = QLabel(text.upper())
-        lbl.setStyleSheet("font-weight:600; font-size:11px;")
-        self.enable = QCheckBox("Enable")
-        h = QHBoxLayout(self)
-        h.addWidget(lbl); h.addStretch(1); h.addWidget(self.enable)
+# ---------------- helpers ----------------
+def set_combo_by_data(cb, value):
+    for i in range(cb.count()):
+        if cb.itemData(i) == value:
+            cb.setCurrentIndex(i)
+            break
 
 class SliderRow(QWidget):
-    """Horizontal slider with live value label."""
     def __init__(self, minv, maxv, step, suffix, start):
         super().__init__()
         self.suffix = suffix
@@ -81,298 +45,417 @@ class SliderRow(QWidget):
         self.slider.setTickInterval(step)
         self.slider.setTickPosition(QSlider.TicksBelow)
         self.slider.setValue(start)
+        self.slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.value_lbl = QLabel(f"{start}{suffix}")
-        h = QHBoxLayout(self)
-        h.addWidget(self.slider, 1)
-        h.addWidget(self.value_lbl)
+        self.value_lbl.setMinimumWidth(44)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(14)
+        lay.addWidget(self.slider, 1)
+        lay.addWidget(self.value_lbl)
         self.slider.valueChanged.connect(lambda v: self.value_lbl.setText(f"{v}{self.suffix}"))
 
-# ---------- Columns ----------
-class SortingColumn(QWidget):
+class SectionHeader(QWidget):
+    def __init__(self, title):
+        super().__init__()
+        self.enable = QCheckBox("Enable")
+        lbl = QLabel(title.upper())
+        lbl.setStyleSheet("font-weight:600; letter-spacing:.2px;")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(lbl)
+        row.addStretch(1)
+        row.addWidget(self.enable)
+
+def legend_widget():
+    def dot(color):
+        f = QFrame()
+        f.setFixedSize(18, 18)
+        f.setStyleSheet(f"background:{color}; border:1px solid #999; border-radius:3px;")
+        return f
+    title = QLabel("Observer Control System")
+    title.setStyleSheet("font-weight:600;")
+    dots = QHBoxLayout()
+    dots.setSpacing(14)
+    dots.addWidget(dot("#4CAF50"))
+    dots.addWidget(dot("#FFC107"))
+    dots.addWidget(dot("#F44336"))
+    w = QWidget()
+    v = QVBoxLayout(w)
+    v.setSpacing(10)
+    v.addWidget(title)
+    v.addLayout(dots)
+    v.addSpacing(8)
+    return w
+
+# ---------------- columns (Bins sliders; compact width) ----------------
+class SortingCol(QWidget):
     def __init__(self):
         super().__init__()
-        self.header = Header("Sorting")
-        self.speed = combo_from_pairs(SPEED_OPTIONS)
-        self.error = SliderRow(5, 15, 1, "%", 10)  # Base Error Rate
-        self.distraction = combo_from_dict(DISTRACTION_OPTIONS)
-        self.num_colours = combo_from_pairs(SORTING_COLOURS)
+        self.hdr = SectionHeader("Sorting")
+        self.speed = QComboBox(); [self.speed.addItem(a,b) for a,b in SPEED_OPTIONS]
+        self.err  = SliderRow(5, 15, 1, "%", 10)
+        self.bins = SliderRow(2, 3, 1, "", 2)      # -> numColours
+        self.dist = QComboBox(); [self.dist.addItem(a,b) for a,b in DISTRACTION_OPTIONS.items()]
+        self.dist.setMinimumWidth(260)  # compact
 
         form = QFormLayout()
-        form.addRow(self.header)
+        form.setHorizontalSpacing(20)
+        form.setVerticalSpacing(18)
+        form.addRow(self.hdr)
         form.addRow("Speed", self.speed)
-        form.addRow("Base Error Rate", self.error)
-        form.addRow("Distraction", self.distraction)
-        form.addRow("Colours", self.num_colours)
+        form.addRow("Base Error Rate", self.err)
+        form.addRow("Bins", self.bins)
+        form.addRow("Distractions", self.dist)
 
         box = QGroupBox(); box.setLayout(form)
-        v = QVBoxLayout(self); v.addWidget(box)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0,0,0,0)
+        outer.addWidget(box)
+        outer.addStretch(1)
 
     def to_dict(self):
         return {
-            "active": self.header.enable.isChecked(),
+            "active": self.hdr.enable.isChecked(),
             "speed": self.speed.currentData(),
-            "errorRate": int(self.error.slider.value()),
-            "numColours": self.num_colours.currentData(),
-            "distraction": self.distraction.currentData(),
+            "errorRate": int(self.err.slider.value()),
+            "numColours": int(self.bins.slider.value()),
+            "distraction": self.dist.currentData(),
         }
 
     def from_dict(self, d):
-        self.header.enable.setChecked(bool(d.get("active", False)))
-        _set_combo_by_data(self.speed, d.get("speed", 8000))
-        self.error.slider.setValue(int(d.get("errorRate", 10)))
-        _set_combo_by_data(self.num_colours, d.get("numColours", 2))
-        _set_combo_by_data(self.distraction, d.get("distraction", [False, False]))
+        self.hdr.enable.setChecked(bool(d.get("active", False)))
+        set_combo_by_data(self.speed, d.get("speed", 8000))
+        self.err.slider.setValue(int(d.get("errorRate", 10)))
+        self.bins.slider.setValue(int(d.get("numColours", 2)))
+        set_combo_by_data(self.dist, d.get("distraction", [False, False]))
 
-class PackagingColumn(QWidget):
+class PackagingCol(QWidget):
     def __init__(self):
         super().__init__()
-        self.header = Header("Packaging")
-        self.speed = combo_from_pairs(SPEED_OPTIONS)
-        self.error = SliderRow(5, 15, 1, "%", 9)
-        self.distraction = combo_from_dict(DISTRACTION_OPTIONS)
-        self.package_num = combo_from_pairs(PACKAGING_SIZES)
+        self.hdr = SectionHeader("Packaging")
+        self.speed = QComboBox(); [self.speed.addItem(a,b) for a,b in SPEED_OPTIONS]
+        self.err  = SliderRow(5, 15, 1, "%", 9)
+        self.bins = SliderRow(4, 6, 1, "", 6)      # -> packageNum
+        self.dist = QComboBox(); [self.dist.addItem(a,b) for a,b in DISTRACTION_OPTIONS.items()]
+        self.dist.setMinimumWidth(260)
 
         form = QFormLayout()
-        form.addRow(self.header)
+        form.setHorizontalSpacing(20)
+        form.setVerticalSpacing(18)
+        form.addRow(self.hdr)
         form.addRow("Speed", self.speed)
-        form.addRow("Base Error Rate", self.error)
-        form.addRow("Distraction", self.distraction)
-        form.addRow("Items / Package", self.package_num)
+        form.addRow("Base Error Rate", self.err)
+        form.addRow("Bins", self.bins)
+        form.addRow("Distractions", self.dist)
 
         box = QGroupBox(); box.setLayout(form)
-        v = QVBoxLayout(self); v.addWidget(box)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0,0,0,0)
+        outer.addWidget(box)
+        outer.addStretch(1)
 
     def to_dict(self):
         return {
-            "active": self.header.enable.isChecked(),
+            "active": self.hdr.enable.isChecked(),
             "speed": self.speed.currentData(),
-            "errorRate": int(self.error.slider.value()),
-            "packageNum": self.package_num.currentData(),
-            "distraction": self.distraction.currentData(),
+            "errorRate": int(self.err.slider.value()),
+            "packageNum": int(self.bins.slider.value()),
+            "distraction": self.dist.currentData(),
         }
 
     def from_dict(self, d):
-        self.header.enable.setChecked(bool(d.get("active", False)))
-        _set_combo_by_data(self.speed, d.get("speed", 8000))
-        self.error.slider.setValue(int(d.get("errorRate", 9)))
-        _set_combo_by_data(self.package_num, d.get("packageNum", 6))
-        _set_combo_by_data(self.distraction, d.get("distraction", [False, False]))
+        self.hdr.enable.setChecked(bool(d.get("active", False)))
+        set_combo_by_data(self.speed, d.get("speed", 8000))
+        self.err.slider.setValue(int(d.get("errorRate", 9)))
+        self.bins.slider.setValue(int(d.get("packageNum", 6)))
+        set_combo_by_data(self.dist, d.get("distraction", [False, False]))
 
-class InspectionColumn(QWidget):
+class InspectionCol(QWidget):
     def __init__(self):
         super().__init__()
-        self.header = Header("Inspection")
-        self.speed = combo_from_pairs(SPEED_OPTIONS)
-        self.error = SliderRow(5, 15, 1, "%", 5)
-        self.distraction = combo_from_dict(DISTRACTION_OPTIONS)
-        self.size = SliderRow(8, 12, 1, " cm", 10)
+        self.hdr = SectionHeader("Inspection")
+        self.speed = QComboBox(); [self.speed.addItem(a,b) for a,b in SPEED_OPTIONS]
+        self.err  = SliderRow(5, 15, 1, "%", 5)
+        self.bins = SliderRow(8, 12, 1, "", 10)    # -> sizeRange
+        self.dist = QComboBox(); [self.dist.addItem(a,b) for a,b in DISTRACTION_OPTIONS.items()]
+        self.dist.setMinimumWidth(260)
 
         form = QFormLayout()
-        form.addRow(self.header)
+        form.setHorizontalSpacing(20)
+        form.setVerticalSpacing(18)
+        form.addRow(self.hdr)
         form.addRow("Speed", self.speed)
-        form.addRow("Base Error Rate", self.error)
-        form.addRow("Distraction", self.distraction)
-        form.addRow("Size Range", self.size)
+        form.addRow("Base Error Rate", self.err)
+        form.addRow("Bins", self.bins)
+        form.addRow("Distractions", self.dist)
 
         box = QGroupBox(); box.setLayout(form)
-        v = QVBoxLayout(self); v.addWidget(box)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0,0,0,0)
+        outer.addWidget(box)
+        outer.addStretch(1)
 
     def to_dict(self):
         return {
-            "active": self.header.enable.isChecked(),
+            "active": self.hdr.enable.isChecked(),
             "speed": self.speed.currentData(),
-            "errorRate": int(self.error.slider.value()),
-            "sizeRange": int(self.size.slider.value()),
-            "distraction": self.distraction.currentData(),
+            "errorRate": int(self.err.slider.value()),
+            "sizeRange": int(self.bins.slider.value()),
+            "distraction": self.dist.currentData(),
         }
 
     def from_dict(self, d):
-        self.header.enable.setChecked(bool(d.get("active", False)))
-        _set_combo_by_data(self.speed, d.get("speed", 8000))
-        self.error.slider.setValue(int(d.get("errorRate", 5)))
-        self.size.slider.setValue(int(d.get("sizeRange", 10)))
-        _set_combo_by_data(self.distraction, d.get("distraction", [False, False]))
+        self.hdr.enable.setChecked(bool(d.get("active", False)))
+        set_combo_by_data(self.speed, d.get("speed", 8000))
+        self.err.slider.setValue(int(d.get("errorRate", 5)))
+        self.bins.slider.setValue(int(d.get("sizeRange", 10)))
+        set_combo_by_data(self.dist, d.get("distraction", [False, False]))
 
-def _set_combo_by_data(cb, value):
-    for i in range(cb.count()):
-        if cb.itemData(i) == value:
-            cb.setCurrentIndex(i); break
+# ---------------- stats block with clear gaps ----------------
+def stats_block(title, rows):
+    w = QWidget()
+    v = QVBoxLayout(w)
+    v.setSpacing(18)  # bigger internal spacing
+    t = QLabel(title.upper())
+    t.setStyleSheet("font-weight:600; letter-spacing:.2px;")
+    v.addWidget(t)
+    v.addSpacing(10)  # gap after title
 
-# ---------- Stats (placeholder) ----------
-def stats_panel(title, rows):
-    gb = QGroupBox(title.upper())
-    form = QFormLayout()
-    for label, value in rows:
-        form.addRow(label, QLabel(value))
-    gb.setLayout(form)
-    return gb
+    last = len(rows) - 1
+    for i, label in enumerate(rows):
+        line = QHBoxLayout()
+        line.setSpacing(18)
+        lab = QLabel(label)
+        val = QLabel("—")
+        line.addWidget(lab)
+        line.addStretch(1)
+        line.addWidget(val)
+        v.addLayout(line)
+        if i != last:
+            v.addSpacing(10)  # gap between rows
 
-# ---------- MAIN WINDOW (renamed) ----------
+    w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+    return w
+
+# ---------------- main window ----------------
 class OCSWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Observer Control System – UI")
-        self.setMinimumSize(1200, 620)
+        self.setWindowTitle("Observer Control System")
+        self.resize(1250, 780)  # sensible default (no sideways scroll)
+        self.setStyleSheet("""
+            QGroupBox { border: 0; margin-top: 0; }
+            QPushButton { min-height: 28px; }
+        """)
 
-        # Left rail: legend + Save/Load + run controls + file load dropdown
-        legend = Legend()
+        # Keep the latest loaded JSON in memory
+        self.current_json = None
 
-        # Session Save
+        # Left rail
+        legend = legend_widget()
         self.session_edit = QLineEdit(); self.session_edit.setPlaceholderText("Session Name")
         self.save_btn = QPushButton("SAVE"); self.save_btn.clicked.connect(self.save_json)
 
-        # Load by file picker
-        self.load_path_edit = QLineEdit(); self.load_path_edit.setPlaceholderText("Choose JSON to Load")
-        self.load_btn = QPushButton("LOAD"); self.load_btn.clicked.connect(self.load_json_dialog)
+        row_save = QHBoxLayout(); row_save.setSpacing(10)
+        row_save.addWidget(self.session_edit, 1)
+        row_save.addWidget(self.save_btn)
 
-        # Load by dropdown (lists *.json in CWD)
-        self.file_combo = QComboBox()
-        self.refresh_file_list()
-        self.file_load_btn = QPushButton("File Load")
-        self.file_load_btn.clicked.connect(self.load_from_combo)
+        self.load_edit = QLineEdit(); self.load_edit.setPlaceholderText("Session File")
+        self.load_btn  = QPushButton("LOAD"); self.load_btn.clicked.connect(self.load_json_dialog)
 
-        # Run controls
+        row_load = QHBoxLayout(); row_load.setSpacing(10)
+        row_load.addWidget(self.load_edit, 1)
+        row_load.addWidget(self.load_btn)
+
+        self.file_combo = QComboBox(); self.refresh_file_list()
+        self.file_load_btn = QPushButton("File Load"); self.file_load_btn.clicked.connect(self.load_from_combo)
+
         self.start_btn = QPushButton("Start")
         self.pause_btn = QPushButton("Pause")
         self.stop_btn  = QPushButton("Stop")
-        # (wire these to your runtime later)
-        for b in (self.start_btn, self.pause_btn, self.stop_btn):
-            b.setCursor(Qt.PointingHandCursor)
 
         rail = QVBoxLayout()
+        rail.setSpacing(16)
         rail.addWidget(legend)
-        rail.addSpacing(8)
-        rail.addWidget(QLabel("Session:"))
-        rail.addWidget(self.session_edit)
-        rail.addWidget(self.save_btn)
-        rail.addSpacing(10)
-        rail.addWidget(QLabel("Load (picker):"))
-        rail.addWidget(self.load_path_edit)
-        rail.addWidget(self.load_btn)
-        rail.addSpacing(10)
-        rail.addWidget(QLabel("File Load (dropdown):"))
+        rail.addLayout(row_save)
+        rail.addLayout(row_load)
         rail.addWidget(self.file_combo)
         rail.addWidget(self.file_load_btn)
         rail.addSpacing(10)
-        rail.addWidget(QLabel("Controls:"))
         rail.addWidget(self.start_btn)
         rail.addWidget(self.pause_btn)
         rail.addWidget(self.stop_btn)
         rail.addStretch(1)
+
         rail_w = QWidget(); rail_w.setLayout(rail)
+        rail_w.setMinimumWidth(260)  # narrower rail to avoid horizontal scroll
 
         # Three task columns
-        self.sorting = SortingColumn()
-        self.packaging = PackagingColumn()
-        self.inspection = InspectionColumn()
+        self.sorting    = SortingCol()
+        self.packaging  = PackagingCol()
+        self.inspection = InspectionCol()
 
-        # Top grid: [rail | Sorting | Packaging | Inspection]
-        top_grid = QGridLayout()
-        top_grid.setHorizontalSpacing(18)
-        top_grid.addWidget(rail_w,       0, 0)
-        top_grid.addWidget(self.sorting, 0, 1)
-        top_grid.addWidget(self.packaging, 0, 2)
-        top_grid.addWidget(self.inspection, 0, 3)
+        top = QGridLayout()
+        top.setContentsMargins(20, 20, 20, 4)
+        top.setHorizontalSpacing(56)   # compact gap between task columns
+        top.setVerticalSpacing(22)
+        top.addWidget(rail_w,          0, 0)
+        top.addWidget(self.sorting,    0, 1)
+        top.addWidget(self.packaging,  0, 2)
+        top.addWidget(self.inspection, 0, 3)
+        top.setColumnStretch(0, 1)   # rail
+        top.setColumnStretch(1, 2)
+        top.setColumnStretch(2, 2)
+        top.setColumnStretch(3, 2)
 
-        # Placeholder stats row (four panels)
-        stats_grid = QGridLayout()
-        stats_grid.setHorizontalSpacing(18)
-        stats_grid.addWidget(stats_panel("Sorting", [
-            ("Error Rate (observed)", "—"),
-            ("Throughput (60s)", "—"),
-            ("Corrections (G/R/B)", "—"),
+        # Stats row (starts mid-page; clear gaps)
+        stats = QGridLayout()
+        stats.setContentsMargins(20, 8, 20, 16)
+        stats.setHorizontalSpacing(56)
+        stats.addWidget(stats_block("Sorting", [
+            "Error Rate (errors/min)", "Throughput (items/min)", "Corrections (# of clicks)"
         ]), 0, 0)
-        stats_grid.addWidget(stats_panel("Packaging", [
-            ("Error Rate (observed)", "—"),
-            ("Throughput (60s)", "—"),
-            ("Corrections (#)", "—"),
+        stats.addWidget(stats_block("Packaging", [
+            "Error Rate (errors/min)", "Throughput (items/min)", "Corrections (# of clicks)"
         ]), 0, 1)
-        stats_grid.addWidget(stats_panel("Inspection", [
-            ("Error Rate (observed)", "—"),
-            ("Throughput (60s)", "—"),
-            ("Corrections (#)", "—"),
+        stats.addWidget(stats_block("Inspection", [
+            "Error Rate (errors/min)", "Throughput (items/min)", "Corrections (# of clicks)"
         ]), 0, 2)
-        stats_grid.addWidget(stats_panel("Participant", [
-            ("Avg. Correctness (%)", "—"),
-            ("Z-Score", "—"),
-            ("Accuracy (%)", "—"),
+        stats.addWidget(stats_block("Participant", [
+            "Avg. Correction Time (s)", "Z-Score", "Accuracy (%)"
         ]), 0, 3)
+        stats.setColumnStretch(0, 1)
+        stats.setColumnStretch(1, 1)
+        stats.setColumnStretch(2, 1)
+        stats.setColumnStretch(3, 1)
 
-        # Status line
-        self.status_lbl = QLabel("Ready.")
-        self.status_lbl.setStyleSheet("color:#666;")
+        self.status = QLabel("Ready.")
+        self.status.setStyleSheet("color:#666; margin-left:20px;")
 
-        # Root layout
+        # Root → vertical-only scroll, stats start mid-page using stretches
         root = QWidget()
-        v = QVBoxLayout(root)
-        v.addLayout(top_grid)
-        v.addSpacing(8)
-        v.addLayout(stats_grid)
-        v.addWidget(self.status_lbl)
-        self.setCentralWidget(root)
+        root_v = QVBoxLayout(root)
+        root_v.setSpacing(16)
+        root_v.addLayout(top)
 
-    # ---------- helpers ----------
+        # push stats toward the middle
+        root_v.addStretch(2)
+
+        root_v.addLayout(stats)
+
+        # keep some space below before status
+        root_v.addStretch(1)
+
+        root_v.addWidget(self.status)
+
+        scroll = QScrollArea()
+        scroll.setWidget(root)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        # vertical-only scrolling
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        self.setCentralWidget(scroll)
+
+    # ------------- save / load (Application/Scenarios) -------------
+    def scenarios_path(self, filename):
+        """Return absolute path for a file inside Application/Scenarios."""
+        return os.path.join(SCENARIOS_DIR, filename)
+
     def refresh_file_list(self):
+        """Populate dropdown with JSON files from Application/Scenarios."""
         self.file_combo.clear()
-        for p in sorted(glob.glob("*.json")):
-            self.file_combo.addItem(p)
+        files = sorted(glob.glob(os.path.join(SCENARIOS_DIR, "*.json")))
+        for p in files:
+            # show only the filename in the dropdown
+            self.file_combo.addItem(os.path.basename(p))
 
-    # ---------- save / load ----------
     def save_json(self):
+        """Save current settings to Application/Scenarios/<name>.json."""
         name = self.session_edit.text().strip()
         if not name:
-            return self._error("Enter a session name.")
+            return self._err("Enter a session name.")
         if not FILENAME_REGEX.match(name):
-            return self._error("Use letters, numbers, _ or - only.")
+            return self._err("Use letters, numbers, _ or - only.")
 
         payload = {
             "sortingTask": self.sorting.to_dict(),
             "packagingTask": self.packaging.to_dict(),
             "inspectionTask": self.inspection.to_dict(),
         }
-        filename = f"{name}.json" if SAVE_WITH_EXTENSION else name
+
+        # Ensure folder exists and save there
+        os.makedirs(SCENARIOS_DIR, exist_ok=True)
+        fn = f"{name}.json"
+        path = self.scenarios_path(fn)
+
         try:
-            with open(filename, "w", encoding="utf-8") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
-            self._info(f"Saved: {filename}")
+            self._ok(f"Saved: {path}")
             self.refresh_file_list()
         except Exception as e:
-            self._error(f"Failed to save: {e}")
+            self._err(f"Failed to save: {e}")
 
     def load_json_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open OCS JSON", "", "JSON Files (*.json);;All Files (*)")
-        if not path: return
+        """Open file picker in Application/Scenarios and load the JSON."""
+        os.makedirs(SCENARIOS_DIR, exist_ok=True)
+        start_dir = os.path.abspath(SCENARIOS_DIR)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open JSON",
+            start_dir,
+            "JSON Files (*.json);;All Files (*)"
+        )
+        if not path:
+            return
+        self.load_edit.setText(path)
         self.load_json_from_path(path)
 
     def load_from_combo(self):
-        if self.file_combo.currentText():
-            self.load_json_from_path(self.file_combo.currentText())
+        """Load the file selected in the dropdown (from Application/Scenarios)."""
+        fn = self.file_combo.currentText().strip()
+        if not fn:
+            return
+        path = self.scenarios_path(fn)
+        self.load_edit.setText(path)
+        self.load_json_from_path(path)
 
     def load_json_from_path(self, path):
+        """Read JSON, apply settings to all columns, keep a copy in memory."""
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+
+            # Apply to UI
             self.sorting.from_dict(data.get("sortingTask", {}))
             self.packaging.from_dict(data.get("packagingTask", {}))
             self.inspection.from_dict(data.get("inspectionTask", {}))
-            self._info(f"Loaded: {os.path.basename(path)}")
+
+            # Store for later use
+            self.current_json = data
+
+            self._ok(f"Loaded: {os.path.basename(path)}")
         except Exception as e:
-            self._error(f"Failed to load: {e}")
+            self._err(f"Failed to load: {e}")
 
-    def _error(self, msg):
+    # ------------- UI helpers -------------
+    def _err(self, msg):
         QMessageBox.critical(self, "Error", msg)
-        self.status_lbl.setText(msg)
-        self.status_lbl.setStyleSheet("color:#b00020;")
+        self.status.setText(msg)
+        self.status.setStyleSheet("color:#b00020; margin-left:20px;")
 
-    def _info(self, msg):
-        self.status_lbl.setText(msg)
-        self.status_lbl.setStyleSheet("color:#2e7d32;")
+    def _ok(self, msg):
+        self.status.setText(msg)
+        self.status.setStyleSheet("color:#2e7d32; margin-left:20px;")
 
-# ---------- entry ----------
+# ------------- entry -------------
 def main():
     import sys
     app = QApplication(sys.argv)
-    w = OCSWindow()   # renamed class
+    w = OCSWindow()
+    # w.showMaximized()  # optional
     w.show()
     sys.exit(app.exec_())
 
