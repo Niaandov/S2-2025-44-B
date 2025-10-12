@@ -5,7 +5,7 @@
 #   packagingTask: active, speed, errorRate, packageNum, distraction
 #   inspectionTask:active, speed, errorRate, sizeRange,  distraction
 
-import os, re, json, glob
+import os, re, json, glob, sys
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QLineEdit, QPushButton,
@@ -23,7 +23,7 @@ DISTRACTION_OPTIONS = {
     "Light": [True, False],
     "Sound + Light": [True, True],
 }
-SCENARIOS_DIR = os.path.join("Application", "Scenarios")  # <— required folder
+SCENARIOS_DIR = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "Scenarios")  # <— required folder
 
 # Ensure the scenarios directory exists
 os.makedirs(SCENARIOS_DIR, exist_ok=True)
@@ -392,7 +392,7 @@ class OCSWindow(QMainWindow):
         path = self.scenarios_path(fn)
 
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            with open(path, "w+", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
             self._ok(f"Saved: {path}")
             self.refresh_file_list()
