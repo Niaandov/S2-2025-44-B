@@ -58,7 +58,7 @@ class SortingTask(Task):
                             boxLocation = 'green'
                     else:
                         boxLocation = 'blue'
-                    print(self.redError)
+
                 case "blue":
                     self.blueError += 1
                     if self.greenError is not None:
@@ -68,20 +68,20 @@ class SortingTask(Task):
                             boxLocation = 'green'
                     else:
                         boxLocation = 'red'
-                    print(self.blueError)
+
                 case "green":
                     self.greenError += 1
                     if random.uniform(0.0, 1.0) >= 0.5:
                         boxLocation = 'blue'
                     else:
                         boxLocation = 'red'
-                    print(self.greenError)
 
-        print(boxLocation)
+
+ 
 
         self.renderWindow.checkSortBox(boxLocation)
 
-        print(self.boxList)
+
         self.renderWindow.animState = 1
 
     def startTask(self):
@@ -116,7 +116,7 @@ class SortingTask(Task):
     def defineErrorBox(self, boxColour):
         self.errorBox = boxColour
 
-        print(boxColour)
+
 
         if self.correctBox is not None:
             self.correctionInterrupt()
@@ -124,7 +124,7 @@ class SortingTask(Task):
     def defineCorrectionBox(self, boxColour):
         self.correctBox = boxColour
 
-        print(boxColour)
+
 
         if self.errorBox is not None:
             self.correctionInterrupt()
@@ -139,7 +139,6 @@ class SortingTask(Task):
     def causeError(self):
         # Does this work? Does this make sense, I'll never tell~
         error = self._errorRate + random.uniform(-0.05, 0.05) >= random.uniform(0.0,1.0)
-        print(error)
         if error:
             return True
         else:
@@ -191,37 +190,56 @@ class sortingTaskWindow(QFrame):
         conveyor.setZValue(1)
         self.scene.addItem(conveyor)
 
-        # Setup Boxes
-        # We always have Red/Blue Boxes so keep them constant
 
+        ########################
+        ## SORTING BIN SET UP ##
+        ########################
+
+        
         # For reference, self.sceneWidth / 2 - self.boxHeight/ 2 is the centre of the screen
-        centreScreenBox = int(self.sceneWidth /2 - self.boxHeight/2)
+        centreScreenBox = int(self.sceneWidth /2 - self.boxHeight/2) - + self.boxHeight * 1.15 / 16
 
-        # This is a stupid, stupid and lazy way of doing this. I could be using the proper way of using a function and then creating an array/dict/list/tuple for the x/y of the boxes.
-        # Might change this? Works since it's 1) easy. and 2) We have a limited number of boxes
-        # Shouldn't have any dips in RAM/CPU time either for alt method
-        redBox = QGraphicsRectItem(centreScreenBox + int(centreScreenBox / 2), int(self.conveyorHeight), int(self.boxHeight * 1.15),int(self.boxHeight * 1.15))
+        # Done manually. 
+                # Create box, set colour, add item to seen, set X + Y transform to keep origin consistent
+
+        # Red
+        redBox = QGraphicsRectItem(0, 0, int(self.boxHeight * 1.15),int(self.boxHeight * 1.15))
         redBox.setBrush(QBrush(QColor(255, 0, 0)))
-        conveyor.setZValue(2)
+        
+        
+        redBox.setX(centreScreenBox + int(centreScreenBox / 2))
+        redBox.setY(int(self.conveyorHeight))
+        
         self.scene.addItem(redBox)
-        self.redX = int(centreScreenBox + int(centreScreenBox / 2))
-        self.redY = self.conveyorHeight
+        # We only use [colour]X values to set targets, so we had an offset here to make sure the box appears in the centre of the box
+        self.redX = int(centreScreenBox + int(centreScreenBox / 2)) + self.boxHeight * 1.15 / 15
+        self.redY = redBox.y()
 
-        blueBox = QGraphicsRectItem(centreScreenBox - int(centreScreenBox / 2), int(self.conveyorHeight),int(self.boxHeight * 1.15), int(self.boxHeight * 1.15))
+        # Blue
+        blueBox = QGraphicsRectItem(0, 0, int(self.boxHeight * 1.15), int(self.boxHeight * 1.15))
         blueBox.setBrush(QBrush(QColor(0, 0, 255)))
-        conveyor.setZValue(2)
+
+        blueBox.setX(centreScreenBox - int(centreScreenBox / 2)) 
+        blueBox.setY(int(self.conveyorHeight))
+
         self.scene.addItem(blueBox)
-        self.blueX = int(centreScreenBox - int(centreScreenBox / 2))
+        self.blueX = int(centreScreenBox - int(centreScreenBox / 2))  + self.boxHeight * 1.15 / 15
         self.blueY = blueBox.y()
 
+        # If we have more than three boxes. Yes this could have been done in a for loop for implementing more than 3 boxes and colours but
+        # Don't need to, don't want to, won't do
         if numColours == 3:
-            greenBox = QGraphicsRectItem(centreScreenBox, int(self.conveyorHeight), int(self.boxHeight * 1.15),int(self.boxHeight * 1.15))
+            greenBox = QGraphicsRectItem(0, 0, int(self.boxHeight * 1.15),int(self.boxHeight * 1.15))
             greenBox.setBrush(QBrush(QColor(0, 255, 0)))
-            conveyor.setZValue(2)
+
+            greenBox.setX(centreScreenBox)
+            greenBox.setY(int(self.conveyorHeight))
+
             self.scene.addItem(greenBox)
 
             self.greenX = centreScreenBox
-            self.greenY = self.conveyorHeight
+            self.greenY = greenBox.y()
+
 
 
 
@@ -229,7 +247,7 @@ class sortingTaskWindow(QFrame):
         # Target is the target x/y for comparison
         # add x/y is the same as distToHalfway
         self.targetX = 0
-        self.targetY = self.conveyorHeight
+        self.targetY = self.conveyorHeight + int(self.boxHeight * 1.15) / 15
         self.addX = 0
         self.addY = 0
 
@@ -327,7 +345,7 @@ class sortingTaskWindow(QFrame):
         # Calculates the dist per step required to get to the halfway point for the arm
             # (Width / 2 ) / ( Total Steps )
                 # (Width / 2) / (speed / timestep [50])
-        self.distToHalfway = int(((self.minWidth/2))  / (speed / 50))
+        self.distToHalfway = (self.sceneWidth /2 - self.boxHeight/2)  / (speed / 50)
 
     def renderNewBox(self, colour):
 
@@ -339,7 +357,8 @@ class sortingTaskWindow(QFrame):
             case "blue":
                 boxCol = "#0000ff"
 
-        tempItem = QGraphicsRectItem(0, self.conveyorTopLocation + self.conveyorHeight / 4, self.boxHeight, self.boxHeight)
+        tempItem = QGraphicsRectItem(0, 0, self.boxHeight, self.boxHeight)
+        tempItem.setY(self.conveyorTopLocation + self.conveyorHeight / 4)
         tempItem.setBrush(QBrush(QColor(boxCol)))
         tempItem.setZValue(500)
         self.boxArray.append(tempItem)
@@ -350,7 +369,7 @@ class sortingTaskWindow(QFrame):
             box.setX(box.x() + disToMovePerMil)
 
         # Changes state once the box at the front of the conveyor reaches the halfway point
-        if(self.boxArray[0].x() == self.sceneWidth / 2):
+        if(self.boxArray[0].x() >= self.sceneWidth /2 - self.boxHeight/2):
             if not self.interrupt:
                 self.taskParent.advBoxQueue()
             else:
@@ -367,27 +386,40 @@ class sortingTaskWindow(QFrame):
                 self.moveToTarget()
 
     def moveToTarget(self):
+        if self.targetX == self.redX and self.heldBox.x() + self.addX > self.targetX:
+            self.addX = self.targetX - self.heldBox.x() 
+        elif self.targetX == self.blueX and self.heldBox.x() + self.addX < self.targetX:
+            self.addX = self.targetX - self.heldBox.x() 
+
+        
+        if self.heldBox.y() - self.addY < self.targetY: 
+            self.addY =  self.heldBox.y() - self.targetY
+        
 
         # Sets the X/Y values to an incremement of their previous state
         self.heldBox.setX(self.heldBox.x() + self.addX)
         self.heldBox.setY(self.heldBox.y() - self.addY)
 
 
-        # Check if the box is:
-            # Slightly above or at TargetY and to the right of or at TargetX
-            # Slightly above or at TargetY and to the left of or at TargetX  
-        if abs(self.heldBox.y() / 2) >= self.targetY and abs(self.heldBox.x()) >= self.targetX or self.targetX == 463 and abs(self.heldBox.y() / 2) >= self.targetY and abs(self.heldBox.x()) <= self.targetX:
+        #print("Current X: " + str(self.heldBox.x()) + ", Target X: " + str(self.targetX) + ", Add X: " + str(self.addX))
+        #print("Current Y: " + str(self.heldBox.y()) + ", Target Y: " + str(self.targetY) + ", Add Y: " + str(self.addY))\
+        print(self.heldBox.y() <= self.targetY and abs(self.heldBox.x()) >= self.targetX)
+        print(self.targetX == self.blueX and self.heldBox.y() <= self.targetY and abs(self.heldBox.x()) <= self.targetX)
+        
+        if self.heldBox.y() <= self.targetY and abs(self.heldBox.x()) >= self.targetX or self.targetX == self.blueX and self.heldBox.y() <= self.targetY and abs(self.heldBox.x()) <= self.targetX:
+           print("moveToTarget Completed.") 
             # If we are not in the interrupt state then move to state 0 
            if not self.interrupt:
                self.taskParent.createNewBox()
                self.boxArray.pop(0)
                self.taskParent.popBox()
+               
             # If we are in the interrupt state and we have no recorded prior state (AKA, the interrupt hasn't finished)
            elif self.interrupt == True and self.priorState is not None:
                self.animState = 2
                self.correctBox(self.errorColour, self.correctedColour)
                self.priorState = 0
-               print("Moving?")
+
            # If we are in interrupt state and we have a recorded prior state, then clear the state 
            else:
                # Set state back
@@ -397,7 +429,7 @@ class sortingTaskWindow(QFrame):
                    self.taskParent.createNewBox()
                self.priorState = None
                self.interrupt = False
-               print("Moving?")
+
 
            # Remove boxes that are hidden or not needed
            if self.toDestroyBox is not None:
@@ -451,10 +483,8 @@ class sortingTaskWindow(QFrame):
                     self.blueSB = None
 
                 self.blueSB = self.boxArray[0]
-                print("blue")
-                print(self.targetX)
             case "red":
-                self.targetX = self.redX
+                self.targetX = self.redX 
 
                 if self.redSB is not None:
                     self.toDestroyBox = self.redSB
@@ -470,10 +500,13 @@ class sortingTaskWindow(QFrame):
                     self.greenSB = None
 
                 self.greenSB = self.boxArray[0]
-
+                
+        
         self.heldBox = self.boxArray[0]
         self.addX = int(((self.targetX - int(self.sceneWidth / 2 - self.boxHeight / 2))) / (self.speed / 50))
         self.addY = int(((self.conveyorTopLocation + self.conveyorHeight / 4) - self.targetY)  / (self.speed / 50))
+
+        print("Box X: " + str(self.heldBox.x()) + ", Box Y: " + str(self.heldBox.y()) + ", Target X: " + str(self.targetX) + ", Target Y: " + str(self.targetY))
 
 
 
