@@ -1,17 +1,22 @@
 import random
 
 from PyQt5.QtCore import QTimer, QRect, Qt
-from PyQt5.QtGui import QBrush, QColor, QPen
-from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QLabel, QPushButton, QGraphicsTextItem
+from PyQt5.QtGui import QBrush, QColor, QPen, QRadialGradient
+from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QLabel, QPushButton, QGraphicsTextItem, QGraphicsEllipseItem
+
+import pygame
+import os 
+import sys 
 
 from Task import Task
 
 class SortingTask(Task):
-    def __init__(self, errorRateVal, speed, numColours):
+    def __init__(self, errorRateVal, speed, numColours, distractions):
         self._errorRate = errorRateVal
         self._speed = speed
         self.numColours = numColours
-
+        self.beeperEnabled = distractions[1]
+        self.flashLightEnabled = distractions[0]
 
         self.boxList = []
 
@@ -25,11 +30,21 @@ class SortingTask(Task):
         self.correctBox = None
 
 
-        self.renderWindow = sortingTaskWindow(1920,1080,self, self.numColours)
+        self.renderWindow = sortingTaskWindow(640,1080,self, self.numColours, self.flashLightEnabled)
         self.renderWindow.speed = self._speed
 
         # Prevents the creation of a kill timer if one exists
         self.killTimerExists = False
+
+        # Plays a beep, cool right?
+        if self.beeperEnabled:
+            pygame.mixer.init()
+            self.player = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "Sounds\\beep.wav"))
+        
+        if self.flashLightEnabled or self.beeperEnabled:
+            self.distractionTimer = QTimer()
+            self.distractionTimer.timeout.connect(self.doDistraction)
+
 
 
 
@@ -38,6 +53,16 @@ class SortingTask(Task):
         self.boxList.append(colour)
         self.renderWindow.animState = 0
         self.renderWindow.renderNewBox(colour)
+
+    def doDistraction(self):
+        if random.uniform(0.0,1.0) > 0.75:
+            if self.beeperEnabled:
+                self.player.play()
+            if self.flashLightEnabled:
+                self.renderWindow.distractionFlash()
+                QTimer.singleShot(500, self.renderWindow.distractionFlash)
+                
+
 
 
 
@@ -90,6 +115,9 @@ class SortingTask(Task):
             self.createNewBox()
 
         self.renderWindow.startStuff(self._speed)
+        if self.distractionTimer is not None:
+            self.distractionTimer.start(500)
+
 
     def popBox(self):
         self.boxList.pop(0)
@@ -164,7 +192,7 @@ class SortingTask(Task):
 
 
 class sortingTaskWindow(QFrame):
-    def __init__(self, minWidth, minHeight, taskParent, numColours):
+    def __init__(self, minWidth, minHeight, taskParent, numColours, flashLight):
         super().__init__()
 
         self.setObjectName("sortingTask")
@@ -209,6 +237,18 @@ class sortingTaskWindow(QFrame):
         self.scene.addItem(conveyor)
 
         self.numColours = numColours
+
+        ####################
+        ## Flashing Light ##
+        ####################
+        if flashLight:
+            lightSize = ((self.minHeight / 2) / 4) / 2
+            self.lightFlash = QGraphicsEllipseItem(0,0, lightSize * 0.5, lightSize * 0.5)
+            self.lightFlash.setBrush(QBrush(QColor(255,234,0)))
+            self.lightFlash.setX( self.sceneWidth - self.sceneWidth / 16)
+            self.lightFlash.setY(self.sceneHeight / 16)
+            self.scene.addItem(self.lightFlash)
+            self.lightFlash.setVisible(False)
 
 
         ########################
@@ -402,8 +442,10 @@ class sortingTaskWindow(QFrame):
                     self.correctBoxSelected.setStyleSheet("font-weight: bold; color: " + newColour)
             case "warning":
                 self.warningBox.setText(text)
-                
 
+    def distractionFlash(self):
+        self.lightFlash.setVisible(not self.lightFlash.isVisible())                    
+    
     def renderNewBox(self, colour):
 
         match colour:
