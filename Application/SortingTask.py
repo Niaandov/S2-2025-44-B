@@ -19,10 +19,7 @@ class SortingTask(Task):
         self.previousState = 0
 
         # Sorting Task Specific
-        self.redError = 0
-        self.blueError = 0
-        if self.numColours > 2:
-            self.greenError = 0
+        self.error = 0
 
         self.errorBox = None
         self.correctBox = None
@@ -30,6 +27,9 @@ class SortingTask(Task):
 
         self.renderWindow = sortingTaskWindow(1920,1080,self, self.numColours)
         self.renderWindow.speed = self._speed
+
+        # Prevents the creation of a kill timer if one exists
+        self.killTimerExists = False
 
 
 
@@ -48,10 +48,11 @@ class SortingTask(Task):
 
         # Checks for an error
         if self.causeError():
+            self.error += 1
             match self.boxList[0]:
                 case "red":
-                    self.redError += 1
-                    if self.greenError is not None:
+
+                    if self.numColours == 3:
                         if random.uniform(0.0, 1.0) >= 0.5:
                             boxLocation = 'blue'
                         else:
@@ -60,8 +61,7 @@ class SortingTask(Task):
                         boxLocation = 'blue'
 
                 case "blue":
-                    self.blueError += 1
-                    if self.greenError is not None:
+                    if self.numColours == 3:
                         if random.uniform(0.0, 1.0) >= 0.5:
                             boxLocation = 'red'
                         else:
@@ -70,16 +70,16 @@ class SortingTask(Task):
                         boxLocation = 'red'
 
                 case "green":
-                    self.greenError += 1
                     if random.uniform(0.0, 1.0) >= 0.5:
                         boxLocation = 'blue'
                     else:
                         boxLocation = 'red'
 
 
+
  
 
-        self.renderWindow.checkSortBox(boxLocation)
+        self.renderWindow.checkSortBox(boxLocation, self.boxList[0])
 
 
         self.renderWindow.animState = 1
@@ -97,7 +97,7 @@ class SortingTask(Task):
 
     def getRandomColour(self):
 
-        if self.greenError is not None:
+        if self.numColours == 3:
             caseNum = random.randint(0, 2)
         else:
             caseNum = random.randint(0,1)
@@ -115,25 +115,43 @@ class SortingTask(Task):
 
     def defineErrorBox(self, boxColour):
         self.errorBox = boxColour
-
-
+        self.renderWindow.defineLabel("error", boxColour.title(), boxColour)
 
         if self.correctBox is not None:
             self.correctionInterrupt()
 
     def defineCorrectionBox(self, boxColour):
         self.correctBox = boxColour
-
-
+        self.renderWindow.defineLabel("corrected", boxColour.title(), boxColour)
 
         if self.errorBox is not None:
             self.correctionInterrupt()
 
     def correctionInterrupt(self):
-            self.renderWindow.errorColour = self.errorBox
-            self.renderWindow.correctColour = self.correctBox
-            self.renderWindow.interrupt = True
+        if self.correctBox == self.errorBox: 
+            # Error or beep will go here. 
+            self.cleanInterruptValues()
+            self.renderWindow.defineLabel("warning","A box is not correctly sorted if it is in it's appropriate coloured box. Selections annulled")
+            # Timer that kills itself after a second
+            if not self.killTimerExists:
+                QTimer.singleShot(1500, self.cleanWarning)
+                self.killTimerExists = True
+            return
 
+        if not self.renderWindow.interrupt:
+            self.renderWindow.errorColour = self.errorBox
+            self.renderWindow.correctedColour = self.correctBox
+            self.renderWindow.interrupt = True
+    
+    def cleanInterruptValues(self):
+        self.errorBox = None
+        self.correctBox = None
+        self.renderWindow.defineLabel("error", "", "black")
+        self.renderWindow.defineLabel("corrected", "", "black")
+        
+    def cleanWarning(self):
+        self.renderWindow.defineLabel("warning", "")
+        self.killTimerExists = False
 
 
     def causeError(self):
@@ -189,6 +207,8 @@ class sortingTaskWindow(QFrame):
         conveyor.setBrush(QBrush(QColor(155, 155, 155)))
         conveyor.setZValue(1)
         self.scene.addItem(conveyor)
+
+        self.numColours = numColours
 
 
         ########################
@@ -264,8 +284,11 @@ class sortingTaskWindow(QFrame):
         self.boxArray = []
         # 'Stored' box, current box that is in the box pos.
         self.blueSB = None
+        self.blueSBCol = None
         self.greenSB = None
+        self.greenSBCol = None
         self.redSB = None
+        self.redSBCol = None
         self.toDestroyBox = None
         self.heldBox = None
 
@@ -288,29 +311,48 @@ class sortingTaskWindow(QFrame):
         ############
         # Controls #
         ############
+        selectedItemLayout = QHBoxLayout(self)
+        self.errorBoxSelected = QLabel("Box with Error: ")
+        self.errorBoxSelected.setStyleSheet("font-weight: bold")
+        self.errorBoxSelected.setAlignment(Qt.AlignCenter)
+        self.correctBoxSelected = QLabel("Correct Box: ")
+        self.correctBoxSelected.setStyleSheet("font-weight: bold")
+        self.correctBoxSelected.setAlignment(Qt.AlignCenter)
+        self.warningBox = QLabel("")
+        self.warningBox.setStyleSheet("font-weight: bold; color: red")
+        self.warningBox.setAlignment(Qt.AlignCenter)
+        selectedItemLayout.addWidget(self.errorBoxSelected)
+        selectedItemLayout.addWidget(self.warningBox)
+        selectedItemLayout.addWidget(self.correctBoxSelected)
+        root.addLayout(selectedItemLayout)
+
+        
+
         errorLabel = QLabel("Box With Error")
         errorLabel.setAlignment(Qt.AlignCenter)
         root.addWidget(errorLabel)
 
         errorLayout = QHBoxLayout(self)
-        redErrorButton = QPushButton("Red")
-        redErrorButton.setStyleSheet("background-color: red")
+        self.redErrorButton = QPushButton("Red")
+        self.redErrorButton.setStyleSheet("background-color: red")
 
-        redErrorButton.clicked.connect(lambda: self.taskParent.defineErrorBox("red"))
+        self.redErrorButton.clicked.connect(lambda: self.taskParent.defineErrorBox("red"))
 
-        errorLayout.addWidget(redErrorButton)
-        blueErrorButton = QPushButton("Blue")
-        blueErrorButton.setStyleSheet("background-color: blue")
+        errorLayout.addWidget(self.redErrorButton)
+        self.blueErrorButton = QPushButton("Blue")
+        self.blueErrorButton.setStyleSheet("background-color: blue")
 
-        blueErrorButton.clicked.connect(lambda: self.taskParent.defineErrorBox("blue"))
+        self.blueErrorButton.clicked.connect(lambda: self.taskParent.defineErrorBox("blue"))
 
-        errorLayout.addWidget(blueErrorButton)
-        greenErrorButton = QPushButton("Green")
-        greenErrorButton.setStyleSheet("background-color: green")
+        errorLayout.addWidget(self.blueErrorButton)
 
-        greenErrorButton.clicked.connect(lambda: self.taskParent.defineErrorBox("green"))
+        if numColours == 3:
+            self.greenErrorButton = QPushButton("Green")
+            self.greenErrorButton.setStyleSheet("background-color: green")
 
-        errorLayout.addWidget(greenErrorButton)
+            self.greenErrorButton.clicked.connect(lambda: self.taskParent.defineErrorBox("green"))
+            errorLayout.addWidget(self.greenErrorButton)
+
         root.addLayout(errorLayout)
 
 
@@ -319,24 +361,25 @@ class sortingTaskWindow(QFrame):
         root.addWidget(correctionLabel)
 
         correctionLayout = QHBoxLayout(self)
-        redCorrectionButton = QPushButton("Red Correction")
-        redCorrectionButton.setStyleSheet("background-color: red")
-        correctionLayout.addWidget(redCorrectionButton)
+        self.redCorrectionButton = QPushButton("Red Correction")
+        self.redCorrectionButton.setStyleSheet("background-color: red")
+        correctionLayout.addWidget(self.redCorrectionButton)
 
-        redCorrectionButton.clicked.connect(lambda: self.taskParent.defineCorrectionBox("red"))
+        self.redCorrectionButton.clicked.connect(lambda: self.taskParent.defineCorrectionBox("red"))
 
-        blueCorrectionButton = QPushButton("Blue Correction")
-        blueCorrectionButton.setStyleSheet("background-color: blue")
-        correctionLayout.addWidget(blueCorrectionButton)
+        self.blueCorrectionButton = QPushButton("Blue Correction")
+        self.blueCorrectionButton.setStyleSheet("background-color: blue")
+        correctionLayout.addWidget(self.blueCorrectionButton)
 
-        blueCorrectionButton.clicked.connect(lambda: self.taskParent.defineCorrectionBox("blue"))
+        self.blueCorrectionButton.clicked.connect(lambda: self.taskParent.defineCorrectionBox("blue"))
+        
+        if numColours == 3:
+            self.greenCorrectionButton = QPushButton("Green Correction")
+            self.greenCorrectionButton.setStyleSheet("background-color: green")
 
-        greenCorrectionButton = QPushButton("Green Correction")
-        greenCorrectionButton.setStyleSheet("background-color: green")
+            self.greenCorrectionButton.clicked.connect(lambda: self.taskParent.defineCorrectionBox("green"))
+            correctionLayout.addWidget(self.greenCorrectionButton)
 
-        greenCorrectionButton.clicked.connect(lambda: self.taskParent.defineCorrectionBox("green"))
-
-        correctionLayout.addWidget(greenCorrectionButton)
         root.addLayout(correctionLayout)
 
     def startStuff(self, speed):
@@ -346,6 +389,20 @@ class sortingTaskWindow(QFrame):
             # (Width / 2 ) / ( Total Steps )
                 # (Width / 2) / (speed / timestep [50])
         self.distToHalfway = (self.sceneWidth /2 - self.boxHeight/2)  / (speed / 50)
+
+    def defineLabel(self, label, text, newColour = None):
+        match label:
+            case "error":
+                self.errorBoxSelected.setText("Box with Error: " + text)
+                if newColour is not None:
+                    self.errorBoxSelected.setStyleSheet("font-weight: bold; color: " + newColour)
+            case "corrected":
+                self.correctBoxSelected.setText("Correct Box: " + text)
+                if newColour is not None:
+                    self.correctBoxSelected.setStyleSheet("font-weight: bold; color: " + newColour)
+            case "warning":
+                self.warningBox.setText(text)
+                
 
     def renderNewBox(self, colour):
 
@@ -375,6 +432,7 @@ class sortingTaskWindow(QFrame):
             else:
                 self.animState = 2
                 self.priorState = 1
+                self.correctBox(self.errorColour, self.correctedColour)
 
     def doAnimationStep(self):
         match self.animState:
@@ -383,7 +441,19 @@ class sortingTaskWindow(QFrame):
             case 1:
                 self.moveToTarget()
             case 2:
-                self.moveToTarget()
+                self.animCorrectBox()
+
+    def setButtonState(self, enabled):
+        
+        self.blueErrorButton.setEnabled(enabled)
+        self.blueCorrectionButton.setEnabled(enabled)
+
+        self.redErrorButton.setEnabled(enabled)
+        self.redCorrectionButton.setEnabled(enabled)
+
+        if self.numColours == 3:
+            self.greenCorrectionButton.setEnabled(enabled)
+            self.greenErrorButton.setEnabled(enabled)
 
     def moveToTarget(self):
         if self.targetX == self.redX and self.heldBox.x() + self.addX > self.targetX:
@@ -415,65 +485,147 @@ class sortingTaskWindow(QFrame):
                self.taskParent.popBox()
                
             # If we are in the interrupt state and we have no recorded prior state (AKA, the interrupt hasn't finished)
-           elif self.interrupt == True and self.priorState is not None:
+           elif self.interrupt == True:
                self.animState = 2
                self.correctBox(self.errorColour, self.correctedColour)
                self.priorState = 0
-
-           # If we are in interrupt state and we have a recorded prior state, then clear the state 
-           else:
-               # Set state back
-               if self.priorState == 1:
-                   self.taskParent.advBoxQueue()
-               elif self.priorState == 0:
-                   self.taskParent.createNewBox()
-               self.priorState = None
-               self.interrupt = False
-
+               self.boxArray.pop(0)
+               self.taskParent.popBox()
 
            # Remove boxes that are hidden or not needed
            if self.toDestroyBox is not None:
                self.scene.removeItem(self.toDestroyBox)
                self.toDestroyBox = None
 
+    def animCorrectBox(self):
+        print("We are in Anim CorrectBox. Target X: " + str(self.targetX) + ". Current X: " + str(self.heldBox.x()) + ". ErrorColour and correctedColour: " + str(self.errorColour) + " " + str(self.correctedColour) )
+        print("addX: " + str(self.addX))
+
+        if self.errorColour is None or self.correctedColour is None:
+            self.cleanInterruptState()
+            return
+
+        # Encountered some issue with setting and equalting the position of certain box combos, this is a quick fix for this
+        # I'm dead sure its a floating point issue which its why its called that, but if it isnt ah hehe hoho 
+        floatingPointErrorSolve = False
+
+        if self.targetX == self.redX and self.heldBox.x() + self.addX > self.targetX or self.targetX == self.greenX and self.errorColour == "blue" and self.heldBox.x() + self.addX > self.targetX:
+            self.addX = self.targetX - self.heldBox.x() 
+        elif self.targetX == self.blueX and self.heldBox.x() + self.addX < self.targetX or self.targetX == self.greenX and self.errorColour == "red" and self.heldBox.x() + self.addX < self.targetX:
+            self.addX = self.targetX - self.heldBox.x() 
+
+        if int(self.targetX) == int(self.heldBox.x()):
+            floatingPointErrorSolve = True
+            self.heldBox.setX(self.targetX)
+            self.addX = 0
+
+        self.heldBox.setX(self.heldBox.x() + self.addX)
+
+        if self.heldBox.x() == self.targetX or floatingPointErrorSolve: 
+            if self.priorState == 1:
+                self.taskParent.advBoxQueue()
+            elif self.priorState == 0:
+                self.taskParent.createNewBox()
+            
+            self.priorState = None
+            self.interrupt = False
+
+            self.errorColour = None
+            self.correctColour = None
+            self.taskParent.cleanInterruptValues()
+            self.taskParent.error -= 1
+
+            self.setButtonState(True)
+
+    def cleanInterruptState(self):
+        if self.priorState == 1:
+                self.taskParent.advBoxQueue()
+        elif self.priorState == 0:
+                self.taskParent.createNewBox()
+
+        self.priorState = None
+        self.interrupt = False
+
+        self.errorColour = None
+        self.correctColour = None
+        self.taskParent.cleanInterruptValues()
+        
+        
+
     def correctBox(self, currentBox, newBox):
         # Probably better way to do this but w/e it's done only once so we can be slightly more inefficient
+        if self.errorColour is None or self.correctedColour is None:
+            self.cleanInterruptState()
+            return
+        
+        match currentBox:
+            case "red":
+                # If currentBox already has the actual right colour in it (E.G red box in red box). Stop everything and give warning
+                if currentBox == self.redSBCol:
+                    self.defineLabel("warning", "No Error present in red box. This can occur if the box is in the process of being replaced by a new box")
+                    self.cleanInterruptState()
+                    return
+                if newBox != self.redSBCol:
+                    self.defineLabel("warning", "Cannot create an error. This error can also occur if the box is in the process of being replaced by a new box.")
+                    self.cleanInterruptState()
+                    return
+
+                self.heldBox = self.redSB
+                self.redSB = None
+            case "green":
+                if currentBox == self.greenSBCol:
+                    self.defineLabel("warning", "No Error present in green box. This can occur if the box is in the process of being replaced by a new box")
+                    self.cleanInterruptState()
+                    return
+                if newBox != self.greenSBCol:
+                    self.defineLabel("warning", "Cannot create an error. This error can also occur if the box is in the process of being replaced by a new box.")
+                    self.cleanInterruptState()
+                    return
+                self.heldBox = self.greenSB
+                self.greenSB = None
+            case "blue":
+                if currentBox == self.blueSBCol:
+                    self.defineLabel("warning", "No Error present in blue box. This can occur if the box is in the process of being replaced by a new box")
+                    self.cleanInterruptState()
+                    return
+                if newBox != self.blueSBCol:
+                    self.defineLabel("warning", "Cannot create an error. This error can also occur if the box is in the process of being replaced by a new box.")
+                    self.cleanInterruptState()
+                    return
+                self.heldBox = self.blueSB
+                self.blueSB =  None
+        
         match newBox:
             case "red":
                 self.targetX = self.redX
                 if self.redSB is not None:
                     self.toDestroyBox = self.redSB
-                    #self.redSB = None
+                self.redSB = self.heldBox
             case "green":
                 self.targetX = self.greenX
                 if self.greenSB is not None:
                     self.toDestroyBox = self.greenSB
-                    #self.greenSB = None
+                self.greenSB = self.heldBox
             case "blue":
                 self.targetX = self.blueX
                 if self.blueSB is not None:
                     self.toDestroyBox = self.blueSB
-                    #self.blueSB = None
-
-        match currentBox:
-            case "red":
-                self.heldBox = self.redSB
-            case "green":
-                self.heldBox = self.greenSB
-            case "blue":
-                self.heldBox = self.blueSB
+                self.blueSB = self.heldBox
 
 
+
+        # If stuff gets here, we have no errors, so we can disable buttons
+        self.setButtonState(False)
 
         # Mainly placeholder until I can bother to work on proper animations. Animation in this stuff is difficult so Functionality Over Form for now
         # AddY is 0 since we're moving from a box to box and theyre all on the same Y
-        self.addX = int(((self.targetX - int(self.sceneWidth / 2 - self.boxHeight / 2))) / (self.speed / 50))
+        self.addX = int(((self.targetX - self.heldBox.x())) / (self.speed / 50))
         self.addY = 0
 
 
 
 
-    def checkSortBox(self, colour):
+    def checkSortBox(self, colour, boxRealColour):
         match(colour):
             case "blue":
                 self.targetX = self.blueX
@@ -483,6 +635,8 @@ class sortingTaskWindow(QFrame):
                     self.blueSB = None
 
                 self.blueSB = self.boxArray[0]
+                self.blueSBCol = boxRealColour
+
             case "red":
                 self.targetX = self.redX 
 
@@ -491,6 +645,7 @@ class sortingTaskWindow(QFrame):
                     self.redSB = None
 
                 self.redSB = self.boxArray[0]
+                self.redSBCol = boxRealColour 
 
             case "green":
                 self.targetX = self.greenX
@@ -500,6 +655,7 @@ class sortingTaskWindow(QFrame):
                     self.greenSB = None
 
                 self.greenSB = self.boxArray[0]
+                self.greenSBCol = boxRealColour
                 
         
         self.heldBox = self.boxArray[0]
