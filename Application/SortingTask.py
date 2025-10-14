@@ -46,7 +46,7 @@ class SortingTask(Task):
             self.distractionTimer.timeout.connect(self.doDistraction)
 
 
-
+    # Commit exampole
 
     def createNewBox(self):
         colour = self.getRandomColour()
