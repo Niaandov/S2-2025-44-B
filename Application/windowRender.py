@@ -1,46 +1,15 @@
-import traceback
-
-from PyQt5.QtGui import *
-from PyQt5.QtCore import *
-from PyQt5.QtCore import Qt, QObject
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QLabel, QVBoxLayout, QPushButton, QGridLayout, \
-    QSizePolicy, QHBoxLayout
-
-import time
-
-from SortingTask import SortingTask
-
+# window_render.py
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QPushButton,
+    QVBoxLayout, QHBoxLayout, QGridLayout, QSizePolicy
+)
+from PyQt5.QtCore import Qt, QTimer
 import sys
 
-# Worker Code, will probably nbeed to use this at some point. Python threads also work really so itd dealers choice when
-# we get to it
-'''class WorkerSignals(QObject):
-    textUpdate = pyqtSignal(str)
-    animChange = pyqtSignal()
+from SortingTask import SortingTask
+from ocs_ui import OCSWindow   # per Week 12
 
-class Worker(QRunnable):
-    def __init__(self, fn, *args, **kwargs):
-        super().__init__()
-
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-        self.signals = WorkerSignals()
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-        except:
-            traceback.print_exc()
-            exctype, value = sys.exc_info()[:2]
-        else:
-            self.signals.textUpdate.emit("1")
-        finally:
-            self.signals.animChange.emit()'''
-
-
-
+SAFE_MODE_IGNORE_SETTINGS = True   # ← keep True until things are stable
 
 class taskGrid(QWidget):
     def __init__(self, minTileWidth, hgap, vgap):
@@ -51,108 +20,177 @@ class taskGrid(QWidget):
         self._boxes = []
 
         self.grid = QGridLayout(self)
-        self.grid.setContentsMargins(12,12,12,12)
+        self.grid.setContentsMargins(12, 12, 12, 12)
         self.grid.setHorizontalSpacing(self.hgap)
         self.grid.setVerticalSpacing(self.vgap)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-    def addTask(self, task):
-        task = task.renderWindow
+    def addTaskWidget(self, w):
+        if w and w not in self._boxes:
+            w.setParent(self)
+            self._boxes.append(w)
+            self._relayout()
 
-        task.setParent(self)
-        self._boxes.append(task)
-        self._relayout()
-
-    def removeTask(self, box):
-        if box in self._boxes:
-            self._boxes.remove(box)
-            box.setParent(None)
-            box.deleteLater()
+    def removeTaskWidget(self, w):
+        if w in self._boxes:
+            self._boxes.remove(w)
+            w.setParent(None)
+            w.deleteLater()
             self._relayout()
 
     def clear(self):
         for b in list(self._boxes):
-            b.setParent(None)
-            b.deleteLater()
-        self._boxes.clear()
-        self._relayout()
+            self.removeTaskWidget(b)
 
     def _columns(self):
         w = max(1, self.width())
-
-        cols = max(1, int((w-self.hgap)//(self.minTileWidth + self.hgap)))
-        return cols
+        return max(1, int((w - self.hgap) // (self.minTileWidth + self.hgap)))
 
     def _relayout(self):
         while self.grid.count():
             it = self.grid.takeAt(0)
             if it and it.widget():
                 it.widget().setParent(self)
-
         cols = self._columns()
-
         for i, b in enumerate(self._boxes):
-            r,c = divmod(i, cols)
-            self.grid.addWidget(b,r,c)
-
+            r, c = divmod(i, cols)
+            self.grid.addWidget(b, r, c)
         for c in range(cols):
-            self.grid.setColumnStretch(c,1)
-        self.grid.setRowStretch(self.grid.rowCount(),1)
+            self.grid.setColumnStretch(c, 1)
+        self.grid.setRowStretch(self.grid.rowCount(), 1)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._relayout()
 
 
-
-
-
-
 class testWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Monitoring Window")
-        self.resize(1920, 1080)
+        self.resize(1280, 720)
 
-        self.sTask = SortingTask(0.25,1000,3)
+        self.sTask = None
+        self._last_ocs = {}  # cache settings safely
 
-        ## Temp
-        top = QWidget()
-        top_l = QHBoxLayout(top)
-        top_l.setContentsMargins(8,8,8,8)
-
-        self.grid = taskGrid(1920,12,12)
-
-        root = QWidget()
-        root_l = QVBoxLayout(root)
-        root_l.setContentsMargins(0,0,0,0)
+        # UI shell
+        top = QWidget(); top_l = QHBoxLayout(top); top_l.setContentsMargins(8, 8, 8, 8)
+        root = QWidget(); root_l = QVBoxLayout(root); root_l.setContentsMargins(0, 0, 0, 0)
         self.setCentralWidget(root)
-        root_l.addWidget(top); root_l.addWidget(self.grid)
+        root_l.addWidget(top)
 
-        self.grid.addTask(self.sTask)
+        self.grid = taskGrid(600, 10, 10)
+        root_l.addWidget(self.grid)
 
-        startButton = QPushButton("Start")
-        startButton.clicked.connect(self.sTask.startTask)
-        top_l.addWidget(startButton)
+        btnOpenOCS = QPushButton("Open OCS"); btnOpenOCS.clicked.connect(self.showOCSWindow)
+        top_l.addWidget(btnOpenOCS)
 
+        self.OCSWindow = None
+        self.showOCSWindow()
 
+    # ---------- OCS ----------
+    def showOCSWindow(self):
+        if self.OCSWindow is None:
+            self.OCSWindow = OCSWindow(self)
+            self.OCSWindow.playClicked.connect(self.play)
+            self.OCSWindow.pauseClicked.connect(self.pause)
+            self.OCSWindow.stopClicked.connect(self.stop)
 
+            if not SAFE_MODE_IGNORE_SETTINGS and hasattr(self.OCSWindow, "settingsChanged"):
+                # Queue the settings handling to the event loop to avoid re-entrancy
+                self.OCSWindow.settingsChanged.connect(
+                    lambda s: QTimer.singleShot(0, lambda: self._apply_settings_from_ocs(dict(s)))
+                )
+            elif hasattr(self.OCSWindow, "settingsChanged"):
+                # In safe mode we still cache, but via queued call and without touching widgets
+                self.OCSWindow.settingsChanged.connect(
+                    lambda s: QTimer.singleShot(0, lambda: self._cache_settings_only(dict(s)))
+                )
 
-app = QApplication(sys.argv)
+        self.OCSWindow.show()
+        self.OCSWindow.raise_()
+        self.OCSWindow.activateWindow()
 
-window = testWindow()
-window.show()
+    # ---------- Controls ----------
+    def play(self):
+        print("[testWindow] Play clicked")
+        try:
+            # if no SortingTask yet, create one
+            if self.sTask is None:
+                # get parameters from OCS if available
+                settings = getattr(self, "lastOCSSettings", {
+                    "errorRate": 0.1,
+                    "speed": 8000,
+                    "numColours": 2
+                })
+                print("[testWindow] Creating SortingTask:", settings["errorRate"], settings["speed"], settings["numColours"])
+                self.sTask = SortingTask(settings["errorRate"], settings["speed"], settings["numColours"])
+                self.grid.addTaskWidget(self.sTask.renderWindow)
 
+            # safety delay before starting the animation
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(200, self._safeStartTask)
 
-# Load bearing force show error. Literally will not give you a buttload of error information if this isn't here
-# TF2 Coconut Texture levels of important
-sys._excepthook = sys.excepthook
-def exception_hook(exctype, value, traceback):
-    print(exctype, value, traceback)
-    sys._excepthook(exctype, value, traceback)
-    sys.exit(1)
-sys.excepthook = exception_hook
+        except Exception as e:
+            print("[ERROR in play()]:", e)
 
+    def _safeStartTask(self):
+        """Starts task safely (separate from UI creation)"""
+        try:
+            if self.sTask:
+                self.sTask.startTask()
+                print("[testWindow] SortingTask started successfully.")
+        except Exception as e:
+            print("[ERROR in _safeStartTask]:", e)
+
+    def pause(self):
+        print("[testWindow] Pause clicked")
+        if self.sTask and hasattr(self.sTask, "pauseTask"):
+            self.sTask.pauseTask()
+
+    def stop(self):
+        print("[testWindow] Stop clicked")
+        if self.sTask and hasattr(self.sTask, "stopTask"):
+            self.sTask.stopTask()
+
+    # ---------- Settings handling ----------
+    def _cache_settings_only(self, s: dict):
+        print("[testWindow] (cached) OCS settings:", s)
+        self._last_ocs = dict(s)
+
+    def _apply_settings_from_ocs(self, s: dict):
+        """Full mode (disabled while SAFE_MODE_IGNORE_SETTINGS=True)."""
+        print("[testWindow] OCS settings:", s)
+        self._last_ocs = dict(s)
+        enabled = bool(s.get("sortingEnabled", False))
+
+        if self.sTask is not None:
+            if not enabled:
+                try:
+                    if hasattr(self.sTask, "stopTask"):
+                        self.sTask.stopTask()
+                    self.grid.removeTaskWidget(self.sTask.renderWindow)
+                except Exception as e:
+                    print("[testWindow] Error removing SortingTask:", e)
+                self.sTask = None
+                print("[testWindow] Removed SortingTask")
+                return
+
+            if "speed" in s and hasattr(self.sTask, "setSpeed"):
+                self.sTask.setSpeed(int(s["speed"]))
+            if "errorRate" in s and hasattr(self.sTask, "setErrorRate"):
+                self.sTask.setErrorRate(float(s["errorRate"]) / 100.0)
+            if "numColours" in s and hasattr(self.sTask, "setNumColours"):
+                self.sTask.setNumColours(int(s["numColours"]))
+            if "distractions" in s and hasattr(self.sTask, "setDistractions"):
+                self.sTask.setDistractions(list(s["distractions"]))
+        # If no task exists, we wait for Play() to create it (safe point).
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    w = testWindow()
+    w.show()
+    sys.exit(app.exec())
 
 
 
@@ -162,7 +200,7 @@ sys.excepthook = exception_hook
 
 
 # Everything stops here? Cool whatever
-app.exec()
+
 
 ################
 # IN CODE DOCO #
