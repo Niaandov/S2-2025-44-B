@@ -91,7 +91,7 @@ class testWindow(QMainWindow):
     # ---------- OCS ----------
     def showOCSWindow(self):
         if self.OCSWindow is None:
-            self.OCSWindow = OCSWindow(self)
+            self.OCSWindow = OCSWindow()
             self.OCSWindow.playClicked.connect(self.play)
             self.OCSWindow.pauseClicked.connect(self.pause)
             self.OCSWindow.stopClicked.connect(self.stop)
@@ -121,7 +121,7 @@ class testWindow(QMainWindow):
                 settings = getattr(self, "lastOCSSettings", {
                     "errorRate": 0.1,
                     "speed": 8000,
-                    "numColours": 2
+                    "numColours": 3
                 })
                 print("[testWindow] Creating SortingTask:", settings["errorRate"], settings["speed"], settings["numColours"])
                 self.sTask = SortingTask(settings["errorRate"], settings["speed"], settings["numColours"])
