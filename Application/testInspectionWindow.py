@@ -1,3 +1,7 @@
+"""
+This file is just a tester file to help trouble shoot the inspection task
+ it can be deleted once the inspection task is implmented with the windowRender.py
+"""
 from PyQt5.QtWidgets import QApplication
 import sys
 from inspectionTask import inspectionTask
