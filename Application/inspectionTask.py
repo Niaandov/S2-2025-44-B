@@ -23,9 +23,10 @@ from Task import Task
 # TASK CLASS
 # -----------------------------------
 class inspectionTask(Task):
-    def __init__(self, errorRateVal, speed):
+    def __init__(self, errorRateVal, speed, acceptedRange):
         self._errorRate = errorRateVal
         self._speed = speed
+        self._acceptedRange = acceptedRange
 
         self.itemList = []
 
@@ -74,7 +75,7 @@ class inspectionTask(Task):
         self.renderWindow.renderNewItem(size)
 
     def evaluateItem(self, size):
-        return 8.0 <= size <= 12.0
+        return 8.0 <= size <= self._acceptedRange
 
     def performInspection(self):
         if not self.itemList:
