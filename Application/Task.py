@@ -6,15 +6,6 @@ from PyQt5.QtWidgets import QGraphicsItem
 
 class Task(ABC):
 
-    @property
-    @abstractmethod
-    def errorRate(self):
-        pass
-
-    @property
-    @abstractmethod
-    def speed(self):
-        pass
 
     @abstractmethod
     def __init__(self):
