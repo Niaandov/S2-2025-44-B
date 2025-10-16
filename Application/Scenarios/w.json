@@ -1,9 +1,9 @@
 {
   "sortingTask": {
-    "active": false,
-    "speed": 4000,
-    "errorRate": 7,
-    "numColours": 2,
+    "active": true,
+    "speed": 1000,
+    "errorRate": 10,
+    "numColours": 3,
     "distraction": [
       false,
       true
@@ -11,22 +11,22 @@
   },
   "packagingTask": {
     "active": false,
-    "speed": 1000,
-    "errorRate": 11,
-    "packageNum": 5,
+    "speed": 8000,
+    "errorRate": 9,
+    "packageNum": 6,
     "distraction": [
-      true,
+      false,
       false
     ]
   },
   "inspectionTask": {
     "active": false,
     "speed": 8000,
-    "errorRate": 13,
-    "sizeRange": 12,
+    "errorRate": 5,
+    "sizeRange": 10,
     "distraction": [
-      true,
-      true
+      false,
+      false
     ]
   }
 }

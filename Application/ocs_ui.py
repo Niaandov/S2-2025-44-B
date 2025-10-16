@@ -14,7 +14,7 @@
 #       distractions: list[str] # ["light","sound"] or []
 #   }
 
-import os, re, json, glob
+import os, re, json, glob, sys
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QLineEdit, QPushButton,
@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
 # ---------- Config ----------
 FILENAME_REGEX = re.compile(r"^[A-Za-z0-9_-]+$")
 SAVE_WITH_EXTENSION = True
+SCENARIOS_DIR = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "Scenarios")
 
 # ---------- Mappings ----------
 SPEED_OPTIONS = [("Slow (8s)", 8000), ("Medium (4s)", 4000), ("Fast (1s)", 1000)]
@@ -237,9 +238,6 @@ class OCSWindow(QMainWindow):
         self.session_edit = QLineEdit(); self.session_edit.setPlaceholderText("Session Name")
         self.save_btn = QPushButton("SAVE"); self.save_btn.clicked.connect(self.save_json)
 
-        # Load by file picker
-        self.load_path_edit = QLineEdit(); self.load_path_edit.setPlaceholderText("Choose JSON to Load")
-        self.load_btn = QPushButton("LOAD"); self.load_btn.clicked.connect(self.load_json_dialog)
 
         # Load by dropdown (lists *.json in CWD)
         self.file_combo = QComboBox()
@@ -271,9 +269,6 @@ class OCSWindow(QMainWindow):
         rail.addWidget(self.session_edit)
         rail.addWidget(self.save_btn)
         rail.addSpacing(10)
-        rail.addWidget(QLabel("Load (picker):"))
-        rail.addWidget(self.load_path_edit)
-        rail.addWidget(self.load_btn)
         rail.addSpacing(10)
         rail.addWidget(QLabel("File Load (dropdown):"))
         rail.addWidget(self.file_combo)
@@ -340,8 +335,8 @@ class OCSWindow(QMainWindow):
     # ---------- helpers ----------
     def refresh_file_list(self):
         self.file_combo.clear()
-        for p in sorted(glob.glob("*.json")):
-            self.file_combo.addItem(p)
+        for p in sorted(glob.glob(SCENARIOS_DIR + "\\" + "*.json")):
+            self.file_combo.addItem(p.replace(SCENARIOS_DIR + "\\", ""))
 
     # ---------- save / load ----------
     def save_json(self):
@@ -351,24 +346,24 @@ class OCSWindow(QMainWindow):
         if not FILENAME_REGEX.match(name):
             return self._error("Use letters, numbers, _ or - only.")
 
-        payload = self._full_payload()
+        payload = {
+            "sortingTask": self.sorting.to_dict(),
+            "packagingTask": self.packaging.to_dict(),
+            "inspectionTask": self.inspection.to_dict(),
+        }
         filename = f"{name}.json" if SAVE_WITH_EXTENSION else name
+        actualPath = os.path.join(SCENARIOS_DIR, filename)
         try:
-            with open(filename, "w", encoding="utf-8") as f:
+            with open(actualPath, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
             self._info(f"Saved: {filename}")
             self.refresh_file_list()
         except Exception as e:
             self._error(f"Failed to save: {e}")
 
-    def load_json_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open OCS JSON", "", "JSON Files (*.json);;All Files (*)")
-        if not path: return
-        self.load_json_from_path(path)
-
     def load_from_combo(self):
         if self.file_combo.currentText():
-            self.load_json_from_path(self.file_combo.currentText())
+            self.load_json_from_path(SCENARIOS_DIR + "\\" + self.file_combo.currentText())
 
     def load_json_from_path(self, path):
         try:

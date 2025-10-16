@@ -1,11 +1,11 @@
 {
   "sortingTask": {
-    "active": false,
-    "speed": 1000,
-    "errorRate": 12,
+    "active": true,
+    "speed": 4000,
+    "errorRate": 8,
     "numColours": 3,
     "distraction": [
-      false,
+      true,
       false
     ]
   },
