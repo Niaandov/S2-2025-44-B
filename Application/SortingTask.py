@@ -45,6 +45,20 @@ class SortingTask(Task):
         self._errorRate = value
 
 
+    def updateTask(self, speed, errorRateVal, numColours, distrataction):
+        self._speed = speed
+        self._errorRate = errorRateVal
+        
+        if self.numColours > numColours:
+            self.renderWindow.updateBoxAmount("remove")
+        elif self.numColours < numColours: 
+            self.renderWindow.updateBoxAmount("add")
+        self.numColours = numColours
+
+
+
+
+
     def createNewBox(self):
         colour = self.getRandomColour()
         self.boxList.append(colour)
@@ -52,7 +66,11 @@ class SortingTask(Task):
         self.renderWindow.renderNewBox(colour)
 
 
-
+    def pause(self):
+        self.renderWindow.animTimer.stop()
+    
+    def renableTimer(self):
+        self.renderWindow.animTimer.start(50)
 
 
     def advBoxQueue(self):
@@ -211,10 +229,10 @@ class sortingTaskWindow(QFrame):
         self.blueY = blueBox.y()
 
         if numColours == 3:
-            greenBox = QGraphicsRectItem(centreScreenBox, int(self.conveyorHeight), int(self.boxHeight * 1.15),int(self.boxHeight * 1.15))
-            greenBox.setBrush(QBrush(QColor(0, 255, 0)))
+            self.greenBox = QGraphicsRectItem(centreScreenBox, int(self.conveyorHeight), int(self.boxHeight * 1.15),int(self.boxHeight * 1.15))
+            self.greenBox.setBrush(QBrush(QColor(0, 255, 0)))
             conveyor.setZValue(2)
-            self.scene.addItem(greenBox)
+            self.scene.addItem(self.greenBox)
 
             self.greenX = centreScreenBox
             self.greenY = self.conveyorHeight
@@ -306,6 +324,28 @@ class sortingTaskWindow(QFrame):
            if self.toDestroyBox is not None:
                self.scene.removeItem(self.toDestroyBox)
                self.toDestroyBox = None
+
+    
+    def updateBoxAmount(self, mode):
+        if mode == "add":
+            self.greenBox = QGraphicsRectItem(centreScreenBox, int(self.conveyorHeight), int(self.boxHeight * 1.15),int(self.boxHeight * 1.15))
+            self.greenBox.setBrush(QBrush(QColor(0, 255, 0)))
+            conveyor.setZValue(2)
+            self.scene.addItem(self.greenBox)
+
+            self.greenX = centreScreenBox
+            self.greenY = self.conveyorHeight
+        elif mode == "remove":
+            self.scene.removeItem(self.greenBox)
+            self.greenX = None
+            self.greenY = None
+            if self.greenSB is not None:
+                self.scene.removeItem(self.greenSB)
+                self.greenSB = None
+            
+
+
+        
 
 
     def checkSortBox(self, colour, speed):
