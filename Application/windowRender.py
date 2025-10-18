@@ -3,13 +3,14 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import QTimer
 import sys
 
 from SortingTask import SortingTask
-from ocs_ui import OCSWindow   # per Week 12
+from ocs_ui import OCSWindow
 
-SAFE_MODE_IGNORE_SETTINGS = True   # ← keep True until things are stable
+SAFE_MODE_IGNORE_SETTINGS = True  # keep True until settings flow is tested
+
 
 class taskGrid(QWidget):
     def __init__(self, minTileWidth, hgap, vgap):
@@ -71,7 +72,8 @@ class testWindow(QMainWindow):
         self.resize(1280, 720)
 
         self.sTask = None
-        self._last_ocs = {}  # cache settings safely
+        self._last_ocs = {}
+        self._taskStartedOnce = False  # first run vs resume
 
         # UI shell
         top = QWidget(); top_l = QHBoxLayout(top); top_l.setContentsMargins(8, 8, 8, 8)
@@ -82,7 +84,8 @@ class testWindow(QMainWindow):
         self.grid = taskGrid(600, 10, 10)
         root_l.addWidget(self.grid)
 
-        btnOpenOCS = QPushButton("Open OCS"); btnOpenOCS.clicked.connect(self.showOCSWindow)
+        btnOpenOCS = QPushButton("Open OCS")
+        btnOpenOCS.clicked.connect(self.showOCSWindow)
         top_l.addWidget(btnOpenOCS)
 
         self.OCSWindow = None
@@ -92,17 +95,17 @@ class testWindow(QMainWindow):
     def showOCSWindow(self):
         if self.OCSWindow is None:
             self.OCSWindow = OCSWindow()
+            # OCS buttons → local handlers
             self.OCSWindow.playClicked.connect(self.play)
             self.OCSWindow.pauseClicked.connect(self.pause)
             self.OCSWindow.stopClicked.connect(self.stop)
 
+            # Optional settings sync (kept safe for now)
             if not SAFE_MODE_IGNORE_SETTINGS and hasattr(self.OCSWindow, "settingsChanged"):
-                # Queue the settings handling to the event loop to avoid re-entrancy
                 self.OCSWindow.settingsChanged.connect(
                     lambda s: QTimer.singleShot(0, lambda: self._apply_settings_from_ocs(dict(s)))
                 )
             elif hasattr(self.OCSWindow, "settingsChanged"):
-                # In safe mode we still cache, but via queued call and without touching widgets
                 self.OCSWindow.settingsChanged.connect(
                     lambda s: QTimer.singleShot(0, lambda: self._cache_settings_only(dict(s)))
                 )
@@ -111,13 +114,29 @@ class testWindow(QMainWindow):
         self.OCSWindow.raise_()
         self.OCSWindow.activateWindow()
 
+    # ---------- small helper ----------
+    def _call_if(self, obj, name):
+        try:
+            fn = getattr(obj, name, None)
+            if callable(fn):
+                fn()
+                return True
+        except Exception as e:
+            print(f"[testWindow] _call_if {name} error:", e)
+        return False
+
     # ---------- Controls ----------
     def play(self):
+        """
+        Start/resume behaviour:
+          - If no task: create + start via startTask() (first run).
+          - If task exists:
+                if first run already happened → resume via renableTimer()/resumeTimer()/resume
+                else → start via startTask()
+        """
         print("[testWindow] Play clicked")
         try:
-            # if no SortingTask yet, create one
             if self.sTask is None:
-                # get parameters from OCS if available
                 settings = getattr(self, "lastOCSSettings", {
                     "errorRate": 0.1,
                     "speed": 8000,
@@ -126,40 +145,116 @@ class testWindow(QMainWindow):
                 print("[testWindow] Creating SortingTask:", settings["errorRate"], settings["speed"], settings["numColours"])
                 self.sTask = SortingTask(settings["errorRate"], settings["speed"], settings["numColours"])
                 self.grid.addTaskWidget(self.sTask.renderWindow)
-
-            # safety delay before starting the animation
-            from PyQt5.QtCore import QTimer
-            QTimer.singleShot(200, self._safeStartTask)
-
+                QTimer.singleShot(200, lambda: self._start_or_resume(first_time=True))
+            else:
+                QTimer.singleShot(0, lambda: self._start_or_resume(first_time=False))
         except Exception as e:
             print("[ERROR in play()]:", e)
 
-    def _safeStartTask(self):
-        """Starts task safely (separate from UI creation)"""
+    def _start_or_resume(self, first_time: bool):
         try:
-            if self.sTask:
-                self.sTask.startTask()
-                print("[testWindow] SortingTask started successfully.")
+            if not self.sTask:
+                return
+
+            # First run prefers startTask()
+            if first_time or not self._taskStartedOnce:
+                if self._call_if(self.sTask, "startTask"):
+                    self._taskStartedOnce = True
+                    print("[testWindow] SortingTask started.")
+                    return
+                # Fallback resume names
+                for name in ("renableTimer", "resumeTimer", "resume"):
+                    if self._call_if(self.sTask, name):
+                        self._taskStartedOnce = True
+                        print(f"[testWindow] SortingTask resumed via {name}.")
+                        return
+                print("[testWindow] No start/resume method found.")
+            else:
+                for name in ("renableTimer", "resumeTimer", "resume"):
+                    if self._call_if(self.sTask, name):
+                        print(f"[testWindow] SortingTask resumed via {name}.")
+                        return
+                print("[testWindow] No resume method found.")
         except Exception as e:
-            print("[ERROR in _safeStartTask]:", e)
+            print("[ERROR in _start_or_resume]:", e)
 
     def pause(self):
+        """
+        Pause:
+          1) Try common pause method names if present.
+          2) Stop ALL QTimers owned by the task (findChildren(QTimer)).
+          3) Fallback: try common timer attribute names.
+        This freezes movement so the next Start (resume) continues correctly.
+        """
         print("[testWindow] Pause clicked")
-        if self.sTask and hasattr(self.sTask, "pauseTask"):
-            self.sTask.pauseTask()
+        if not self.sTask:
+            return
+        try:
+            # 1) Named pause methods
+            for name in ("stopTimer", "pauseTimer", "pauseTask", "pause"):
+                if self._call_if(self.sTask, name):
+                    print(f"[testWindow] Pause used {name}()")
+                    return
+
+            # 2) Stop any QTimer children attached to SortingTask
+            timers = self.sTask.findChildren(QTimer)
+            if timers:
+                stopped = 0
+                for t in timers:
+                    try:
+                        t.stop()
+                        stopped += 1
+                    except Exception:
+                        pass
+                print(f"[testWindow] Pause: stopped {stopped} internal timers via findChildren(QTimer).")
+                return
+
+            # 3) Common timer attributes fallback
+            for attr in ("timer", "animTimer", "movementTimer", "updateTimer", "mainTimer"):
+                t = getattr(self.sTask, attr, None)
+                if isinstance(t, QTimer):
+                    t.stop()
+                    print(f"[testWindow] Pause used {attr}.stop()")
+                    return
+
+            print("[testWindow] No pause method/timer found on SortingTask.")
+        except Exception as e:
+            print("[ERROR in pause()]:", e)
 
     def stop(self):
+        """
+        Full teardown so the next Start is a truly fresh run.
+        """
         print("[testWindow] Stop clicked")
-        if self.sTask and hasattr(self.sTask, "stopTask"):
-            self.sTask.stopTask()
+        if not self.sTask:
+            return
+        try:
+            # Prefer full stop, else stopTimer
+            if not self._call_if(self.sTask, "stopTask"):
+                self._call_if(self.sTask, "stopTimer")
 
-    # ---------- Settings handling ----------
+            # Remove widget from UI
+            try:
+                if hasattr(self.sTask, "renderWindow") and self.sTask.renderWindow:
+                    self.grid.removeTaskWidget(self.sTask.renderWindow)
+            except Exception as e:
+                print("[testWindow] stop(): remove widget error:", e)
+
+            # Dispose so next Start creates new task with clean state
+            self.sTask = None
+            self._taskStartedOnce = False
+            print("[testWindow] SortingTask fully stopped and disposed.")
+        except Exception as e:
+            print("[ERROR in stop()]:", e)
+
+    # ---------- Settings handling (kept simple while SAFE mode) ----------
     def _cache_settings_only(self, s: dict):
         print("[testWindow] (cached) OCS settings:", s)
         self._last_ocs = dict(s)
 
     def _apply_settings_from_ocs(self, s: dict):
-        """Full mode (disabled while SAFE_MODE_IGNORE_SETTINGS=True)."""
+        if SAFE_MODE_IGNORE_SETTINGS:
+            return
         print("[testWindow] OCS settings:", s)
         self._last_ocs = dict(s)
         enabled = bool(s.get("sortingEnabled", False))
@@ -167,12 +262,12 @@ class testWindow(QMainWindow):
         if self.sTask is not None:
             if not enabled:
                 try:
-                    if hasattr(self.sTask, "stopTask"):
-                        self.sTask.stopTask()
+                    self._call_if(self.sTask, "stopTask")
                     self.grid.removeTaskWidget(self.sTask.renderWindow)
                 except Exception as e:
                     print("[testWindow] Error removing SortingTask:", e)
                 self.sTask = None
+                self._taskStartedOnce = False
                 print("[testWindow] Removed SortingTask")
                 return
 
@@ -184,7 +279,7 @@ class testWindow(QMainWindow):
                 self.sTask.setNumColours(int(s["numColours"]))
             if "distractions" in s and hasattr(self.sTask, "setDistractions"):
                 self.sTask.setDistractions(list(s["distractions"]))
-        # If no task exists, we wait for Play() to create it (safe point).
+        # If no task exists, Play() will create it.
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
