@@ -83,7 +83,7 @@ class inspectionTask(Task):
 
         # Evaluate the first item
         actual_size = self.itemList[0]
-        true_result = self.evaluateItem(actual_size)  # True = within spec, False = defective
+        true_result = self.evaluateItem(actual_size) 
 
         # Determine if a random error occurred
         error_happened = self.causeError()
@@ -98,15 +98,15 @@ class inspectionTask(Task):
         self.totalInspected += 1
 
         # Count as correct only when measured matches true
-        if measured_result == true_result:
+        if not error_happened:
             self.correctCount += 1
 
-        # Increment defectsMissed when actual item is defective OR when a random error occurred
-        if (not true_result) or error_happened:
+        # Increment whenever a defect is missed.
+        if error_happened:
             self.defectsMissed += 1
 
         # Update UI
-        self.renderWindow.displayInspectionResult(actual_size, measured_result)
+        self.renderWindow.displayInspectionResult(true_result, measured_result)
         self.renderWindow.updateStatsLabel()
 
         # Remove inspected item from queue
@@ -118,16 +118,6 @@ class inspectionTask(Task):
         # Create first item and start the conveyor
         self.createNewItem()
         self.renderWindow.startStuff(self._speed)
-
-
-        self.itemTimer = QTimer()
-        self.itemTimer.timeout.connect(self.createNewItem)
-
-        self.itemTimer.start(int(1000)) #this will spawn a new Item every 1 second
-
-        # self.itemTimer.start(int(self._speed * 100)) # played around with making the spawning speed tied to the speed varible 
-                                                            # but could never get it working right. introduced bugs where it 
-                                                            # would only spawn one item and then stop.
 
 
 
@@ -246,19 +236,29 @@ class inspectionTaskWindow(QFrame):
         self.statsLabel.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.statsLabel)
 
+        # Controls
+        
+
 
         # Animation setup
         self.conveyorItems = []     # Items moving along conveyor
         self.animatedItems = []     # Items moving to bins
         self.animTimer = QTimer()
         self.animTimer.timeout.connect(self.doAnimationStep)
-        self.animTimer.start(50)
+        self.animState = 0
+        
 
         # Pass/fail bin locations
         self.passBinX, self.passBinY = 50, 50
         self.failBinX, self.failBinY = self.sceneWidth - 150, 50
 
-
+        # Box location
+        self.rejectedBox = []
+        self.acceptedBox = []
+        self.correctingBox = None
+        
+        # Box Spawning 
+        self.spawnTimer = 0
 
 
         # Animation parameters
@@ -271,6 +271,7 @@ class inspectionTaskWindow(QFrame):
         self.taskParent.startTask()
         self.startButton.setEnabled(False)
         self.pauseButton.setEnabled(True)
+        self.animTimer.start(50)
 
     #function for the pause button
     def onPauseClicked(self):
@@ -278,8 +279,6 @@ class inspectionTaskWindow(QFrame):
         if hasattr(self, "paused") and self.paused:
             # Resume simulation
             self.animTimer.start(50)
-            if hasattr(self.taskParent, "itemTimer"):
-                self.taskParent.itemTimer.start(int(1000))
             self.pauseButton.setText("Pause Simulation")
             self.paused = False
         else:
@@ -294,15 +293,15 @@ class inspectionTaskWindow(QFrame):
 
     def startStuff(self, speed):
         self.speed = speed
-        self.pixelPerFrame = max(1, int(speed * 0.25))  # slower = smoother
+        #self.pixelPerFrame = max(1, int(speed * 0.25))  # slower = smoother
+        self.pixelPerFrame = int(((self.sceneWidth/2))  / (speed / 50))
 
     def renderNewItem(self, size):
         # Compute box size
         boxWidth = int((size / 15.0) * 100) + 20
         y = self.conveyorTopLocation + self.conveyorHeight / 4
 
-        # i create the rectanges using the clickableBox class so that I can make them interactive
-        item = ClickableBox(boxWidth, 30, size, self.taskParent)
+        item = QGraphicsRectItem(0,0,boxWidth, 30)
 
         item.setBrush(QBrush(QColor(200, 200, 200)))
         item.setZValue(500)
@@ -333,34 +332,50 @@ class inspectionTaskWindow(QFrame):
     def moveConveyorItems(self):
         """Move all items along the conveyor and inspect if they reach middle"""
         items_to_inspect = []
+
+        if random.uniform(0.0, 1.0) > 0.4 + random.uniform(-0.5, 0.5) and self.spawnTimer >= 500:
+            self.taskParent.createNewItem()
+            self.spawnTimer = 0
+        else:
+            self.spawnTimer += 50
+
         for item in self.conveyorItems:
             item.setX(item.x() + self.pixelPerFrame)
 
-
             if item.x() >= self.sceneWidth / 2:
                 items_to_inspect.append(item)
+                self.animState = 1
+                
+        
 
         for item in items_to_inspect:
             self.conveyorItems.remove(item)
             self.currentItem = item
             self.taskParent.performInspection()  # sets color and target
 
-    def displayInspectionResult(self, size, result):
+    def displayInspectionResult(self, intendedResult, result):
         """Color-code inspected item and set target bin for animation"""
         if self.currentItem is None:
             return
 
-        if result:
+        if intendedResult:
             self.currentItem.setBrush(QBrush(QColor(0, 255, 0)))
-            targetX, targetY = self.passBinX, self.passBinY
         else:
             self.currentItem.setBrush(QBrush(QColor(255, 0, 0)))
+
+
+        if result:
+            targetX, targetY = self.passBinX, self.passBinY
+        else:
             targetX, targetY = self.failBinX, self.failBinY
 
         # Animate to bin
-        steps = max(10, int(100 / self.speed))  # slower speed = more steps
+        steps = self.speed / 100 # slower speed = more steps
+
         self.animatedItems.append({
             "item": self.currentItem,
+            "error": not (intendedResult == result),
+            "result": result,
             "targetX": targetX,
             "targetY": targetY,
             "steps": steps,
@@ -370,33 +385,91 @@ class inspectionTaskWindow(QFrame):
         self.updateStatsLabel()
 
         self.currentItem = None  # reset for next item
-        
+
+    def correctItem(self, incorrectBox):
+
+        if incorrectBox == "accepted":
+            box = self.acceptedBox[0]
+            targetX, targetY = self.passBinX, self.passBinY 
+        else:
+            box = self.rejectedBox[0]
+            targetX, targetY = self.failBinX, self.failBinY
+
+        refBox = self.box["item"]
+
+        if not box["error"]:
+            print("NO ERROR")
+            return
+            
+
+        steps = self.speed / 100
+
+        self.correctingBox = {
+            "item": refBox,
+            "error": False,
+            "result": False,
+            "targetX": targetX,
+            "targetY": targetY,
+            "steps": steps,
+            "currentStep": 0
+        }
+    
+    def moveToTarget(self,box):
+                # Animate items moving to bins
+        data = box
+
+        item = data["item"]
+        steps = data["steps"]
+        data["currentStep"] += 1
+            
+           
+        if data["currentStep"] >= steps:
+            # Finalize position at bin
+            item.setX(data["targetX"])
+            item.setY(data["targetY"])
+            self.animatedItems.remove(data)
+            self.animState = 0
+
+
+                # Adds box to the appropriate pile, and removes the box beneath it
+            if data["result"]:
+                self.acceptedBox.append({
+                    "item":item,
+                    "error": data["error"]
+                })
+
+                if len(self.acceptedBox) > 1:
+                    oldItem = self.acceptedBox[0]
+                    self.removeItemFromScene(oldItem["item"])
+                    self.acceptedBox.pop(0)
+
+            else:
+                self.rejectedBox.append({
+                    "item":item,
+                    "error": data["error"]
+                })
+                if len(self.rejectedBox) > 1:
+                    oldItem = self.rejectedBox[0]
+                    self.removeItemFromScene(oldItem["item"])
+                    self.rejectedBox.pop(0)
+
+        else:
+            dx = (data["targetX"] - item.x()) / (steps - data["currentStep"] + 1)
+            dy = (data["targetY"] - item.y()) / (steps - data["currentStep"] + 1)
+            item.setX(item.x() + dx)
+            item.setY(item.y() + dy)
 
     def doAnimationStep(self):
         """Move conveyor and animate items toward bins"""
         # Move conveyor items
-        self.moveConveyorItems()
-
-        # Animate items moving to bins
-        for data in list(self.animatedItems):
-            item = data["item"]
-            steps = data["steps"]
-            data["currentStep"] += 1
-            
-           
-            if data["currentStep"] >= steps:
-                # Finalize position at bin
-                item.setX(data["targetX"])
-                item.setY(data["targetY"])
-                self.animatedItems.remove(data)
-
-                #remove items after 5 seconds of being sorted to save system memory 
-                QTimer.singleShot(5000, lambda i=item: self.removeItemFromScene(i))
-            else:
-                dx = (data["targetX"] - item.x()) / (steps - data["currentStep"] + 1)
-                dy = (data["targetY"] - item.y()) / (steps - data["currentStep"] + 1)
-                item.setX(item.x() + dx)
-                item.setY(item.y() + dy)
+        print("We are actively in doAnimStep, current animState is: " + str(self.animState))
+        match self.animState:
+            case 0:
+                self.moveConveyorItems()
+            case 1:
+                self.moveToTarget(self.animatedItems[0])
+            case 2:
+                self.moveToTarget(self.correctingBox)
 
     #updates the metrics lables with the correct stats
     def updateStatsLabel(self):
@@ -411,43 +484,6 @@ class inspectionTaskWindow(QFrame):
         """Safely remove an item from the scene."""
         if item.scene() is not None:
             self.scene.removeItem(item)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# -----------------
-# Interactive Class
-# -----------------
-# class to make interactive boxes for user correction
-class ClickableBox(QGraphicsRectItem):
-    def __init__(self, width, height, size, taskParent, parent=None):
-        super().__init__(0, 0, width, height, parent)
-        self.size = size                  # store item size
-        self.taskParent = taskParent      # reference to inspectionTask
-        self.setBrush(QBrush(QColor(200, 200, 200)))
-        self.setFlag(QGraphicsRectItem.ItemIsSelectable, True)
-
-    def mousePressEvent(self, event):
-        print(f"Box clicked! Size = {self.size:.1f}")
-
-        # Call overrideResult function in the parent task
-        self.taskParent.overrideResult(self)
-
-        # highlight box on click for visual feedback
-        self.setBrush(QBrush(QColor(255, 255, 0)))  # yellow
-
-        super().mousePressEvent(event)
-
 
 
         

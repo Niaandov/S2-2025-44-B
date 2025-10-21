@@ -10,7 +10,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     # Create a test inspection task
-    task = inspectionTask(errorRateVal=0.1, speed=100)
+    task = inspectionTask(errorRateVal=0.1, speed=2000, acceptedRange=12)
 
     # Show the window
     task.renderWindow.show()
