@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QLabel, QVBoxLay
 
 import time
 
-from SortingTask import SortingTask
+from PackingTask import PackagingTask
 
 import sys
 
@@ -85,7 +85,7 @@ class testWindow(QMainWindow):
         self.setWindowTitle("Monitoring Window")
         self.resize(1920, 1080)
 
-        self.sTask = SortingTask(0.25,1000,3,[True, True])
+        self.sTask = PackagingTask(0.25,4000,4,[True, True])
 
         ## Temp
         top = QWidget()

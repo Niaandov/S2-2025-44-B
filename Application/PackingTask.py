@@ -1,154 +1,108 @@
-import random
+import random, math
 
 from PyQt5.QtCore import QTimer, QRect, Qt
-from PyQt5.QtGui import QBrush, QColor, QPen
-from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QLabel, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem
+from PyQt5.QtGui import QBrush, QColor, QPen, QRadialGradient
+from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QLabel, QPushButton, QGraphicsTextItem, QGraphicsEllipseItem
+
+import pygame
+import os 
+import sys 
 
 from Task import Task
 
-class PackingTask(Task):
-    def __init__(self, errorRateVal, speed, numColours):
+class PackagingTask(Task):
+    def __init__(self, errorRateVal, speed, itemCount, distractions):
         self._errorRate = errorRateVal
         self._speed = speed
-        self.numColours = numColours
 
+        self.beeperEnabled = distractions[1]
+        self.flashLightEnabled = distractions[0]
 
         self.boxList = []
 
         self.programState = 0
         self.previousState = 0
 
-        # Packing Task Specific
-        self.redError = 0
-        self.blueError = 0
-        if self.numColours > 2:
-            self.greenError = 0
+        # Sorting Task Specific
+        self.error = 0
+        self.itemCount = itemCount
 
 
-        self.renderWindow = packingTaskWindow(1920,1080,self, self.numColours)
+        self.renderWindow = packagingTaskWindow(1920,1080,self, self.itemCount, self.flashLightEnabled)
+        self.renderWindow.speed = self._speed
+
+        # Plays a beep, cool right?
+        if self.beeperEnabled:
+            pygame.mixer.init()
+            self.player = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "Sounds\\beep.wav"))
+        
+        if self.flashLightEnabled or self.beeperEnabled:
+            self.distractionTimer = QTimer()
+            self.distractionTimer.timeout.connect(self.doDistraction)
 
 
-    @property
-    def speed(self):
-        return self._speed
-
-    @speed.setter
-    def speed(self, value):
-        self._speed = value
-
-    @property
-    def errorRate(self):
-        return self._errorRate
-
-    @errorRate.setter
-    def errorRate(self, value):
-        self._errorRate = value
-
+    # Commit exampole
 
     def createNewBox(self):
-        colour = self.getRandomColour()
-        self.boxList.append(colour)
         self.renderWindow.animState = 0
-        self.renderWindow.renderNewBox(colour)
+        self.renderWindow.renderNewBox()
 
-
-
-
+    def doDistraction(self):
+        if random.uniform(0.0,1.0) > 0.75:
+            if self.beeperEnabled:
+                self.player.play()
+            if self.flashLightEnabled:
+                self.renderWindow.distractionFlash()
+                QTimer.singleShot(500, self.renderWindow.distractionFlash)
+                
 
     def advBoxQueue(self):
-        boxLocation = self.boxList[0]
-
         # Checks for an error
+        boxNum = self.itemCount
         if self.causeError():
-            match self.boxList[0]:
-                case "red":
-                    self.redError += 1
-                    if self.greenError is not None:
-                        if random.uniform(0.0, 1.0) >= 0.5:
-                            boxLocation = 'blue'
-                        else:
-                            boxLocation = 'green'
-                    else:
-                        boxLocation = 'blue'
-                    print(self.redError)
-                case "blue":
-                    self.blueError += 1
-                    if self.greenError is not None:
-                        if random.uniform(0.0, 1.0) >= 0.5:
-                            boxLocation = 'red'
-                        else:
-                            boxLocation = 'green'
-                    else:
-                        boxLocation = 'red'
-                    print(self.blueError)
-                case "green":
-                    self.greenError += 1
-                    if random.uniform(0.0, 1.0) >= 0.5:
-                        boxLocation = 'blue'
-                    else:
-                        boxLocation = 'red'
-                    print(self.greenError)
+            boxNum = boxNum + self.decideNegative()
+        self.boxList.append(boxNum)
 
-        print(boxLocation)
-
-        self.renderWindow.checkSortBox(boxLocation, self._speed)
-
-        print(self.boxList)
         self.renderWindow.animState = 1
+            
 
     def startTask(self):
 
         for i in range(1):
             self.createNewBox()
 
-        #self.stateTimer = QTimer()
-        #self.stateTimer.timeout.connect(self.nextState)
-        #self.stateTimer.start(self._speed)
-
         self.renderWindow.startStuff(self._speed)
+        if self.distractionTimer is not None:
+            self.distractionTimer.start(500)
+
+    def decideNegative(self):
+        if random.uniform(0.0,1.0) > 0.5:
+            return 1
+        else:   
+            return -1
 
     def popBox(self):
         self.boxList.pop(0)
 
 
-    def getRandomColour(self):
-
-        if self.greenError is not None:
-            caseNum = random.randint(0, 2)
-        else:
-            caseNum = random.randint(0,1)
-
-        match caseNum:
-            case 0:
-                return "red"
-            case 1:
-                return "green"
-            case 2:
-                return "blue"
-            case _:
-                return "blue"
-
 
     def causeError(self):
         # Does this work? Does this make sense, I'll never tell~
         error = self._errorRate + random.uniform(-0.05, 0.05) >= random.uniform(0.0,1.0)
-        print(error)
         if error:
             return True
         else:
             return False
 
 
-class packingTaskWindow(QFrame):
-    def __init__(self, minWidth, minHeight, taskParent, numColours):
+class packagingTaskWindow(QFrame):
+    def __init__(self, minWidth, minHeight, taskParent, itemCount, flashLight):
         super().__init__()
 
-        self.setObjectName("packingTask")
+        self.setObjectName("packagingTask")
         self.setStyleSheet("""QFrame { border: 1px solid #d0d0d0; border-radius: 5px; background: #fafafa;}
         QLabel { font-size: 4vmin;}
         QPushButton { padding: 4px 8px;}""")
-
-
 
         self.setMinimumSize(minWidth, minHeight)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -156,7 +110,6 @@ class packingTaskWindow(QFrame):
         root = QVBoxLayout(self)
         root.setContentsMargins(12,12,12,12)
         root.setSpacing(8)
-
 
         ##################
         ## RENDER LOGIC ##
@@ -172,7 +125,6 @@ class packingTaskWindow(QFrame):
         self.sceneHeight = int(minHeight / 2)
         self.sceneWidth = minWidth
 
-
         self.scene = QGraphicsScene(self)
         self.scene.setBackgroundBrush(QBrush(QColor(105, 105, 105)))
         self.scene.setSceneRect(0,0, self.sceneWidth ,int(minHeight / 2))
@@ -187,43 +139,24 @@ class packingTaskWindow(QFrame):
         conveyor.setZValue(1)
         self.scene.addItem(conveyor)
 
-        # Setup Boxes
-        # We always have Red/Blue Boxes so keep them constant
 
-        # For reference, self.sceneWidth / 2 - self.boxHeight/ 2 is the centre of the screen
-        centreScreenBox = int(self.sceneWidth /2 - self.boxHeight/2)
-
-        # This is a stupid, stupid and lazy way of doing this. I could be using the proper way of using a function and then creating an array/dict/list/tuple for the x/y of the boxes.
-        # Might change this? Works since it's 1) easy. and 2) We have a limited number of boxes
-        # Shouldn't have any dips in RAM/CPU time either for alt method
-        redBox = QGraphicsRectItem(centreScreenBox + int(centreScreenBox / 2), int(self.conveyorHeight), int(self.boxHeight * 1.15),int(self.boxHeight * 1.15))
-        redBox.setBrush(QBrush(QColor(255, 0, 0)))
-        conveyor.setZValue(2)
-        self.scene.addItem(redBox)
-        self.redX = int(centreScreenBox + int(centreScreenBox / 2))
-        self.redY = self.conveyorHeight
-
-        blueBox = QGraphicsRectItem(centreScreenBox - int(centreScreenBox / 2), int(self.conveyorHeight),int(self.boxHeight * 1.15), int(self.boxHeight * 1.15))
-        blueBox.setBrush(QBrush(QColor(0, 0, 255)))
-        conveyor.setZValue(2)
-        self.scene.addItem(blueBox)
-        self.blueX = int(centreScreenBox - int(centreScreenBox / 2))
-        self.blueY = blueBox.y()
-
-        if numColours == 3:
-            greenBox = QGraphicsRectItem(centreScreenBox, int(self.conveyorHeight), int(self.boxHeight * 1.15),int(self.boxHeight * 1.15))
-            greenBox.setBrush(QBrush(QColor(0, 255, 0)))
-            conveyor.setZValue(2)
-            self.scene.addItem(greenBox)
-
-            self.greenX = centreScreenBox
-            self.greenY = self.conveyorHeight
+        ####################
+        ## Flashing Light ##
+        ####################
+        if flashLight:
+            lightSize = ((self.minHeight / 2) / 4) / 2
+            self.lightFlash = QGraphicsEllipseItem(0,0, lightSize * 0.5, lightSize * 0.5)
+            self.lightFlash.setBrush(QBrush(QColor(255,234,0)))
+            self.lightFlash.setX( self.sceneWidth - self.sceneWidth / 16)
+            self.lightFlash.setY(self.sceneHeight / 16)
+            self.scene.addItem(self.lightFlash)
+            self.lightFlash.setVisible(False)
 
         # Move to Box varaibles
         # Target is the target x/y for comparison
         # add x/y is the same as distToHalfway
         self.targetX = 0
-        self.targetY = self.conveyorHeight
+        self.targetY = self.conveyorHeight + int(self.boxHeight * 1.15) / 15
         self.addX = 0
         self.addY = 0
 
@@ -237,12 +170,28 @@ class packingTaskWindow(QFrame):
 
         root.addWidget(viewport)
 
-        self.boxArray = []
-        # 'Stored' box, current box that is in the box pos.
-        self.blueSB = None
-        self.greenSB = None
-        self.redSB = None
-        self.toDestroyBox = None
+        ##############
+        ## Controls ##
+        ##############
+        errorLabel = QLabel("Count Error")
+        errorLabel.setAlignment(Qt.AlignCenter)
+        root.addWidget(errorLabel)
+
+        errorLayout = QHBoxLayout(self)
+        self.plusErrorButton = QPushButton("+")
+        self.plusErrorButton.setStyleSheet("background-color: green")
+
+        self.plusErrorButton.clicked.connect(lambda: self.correctBox("plus"))
+
+        errorLayout.addWidget(self.plusErrorButton)
+        self.minusErrorButton = QPushButton("-")
+        self.minusErrorButton.setStyleSheet("background-color: red")
+
+        self.minusErrorButton.clicked.connect(lambda: self.correctBox("minus"))
+
+        errorLayout.addWidget(self.minusErrorButton)
+        root.addLayout(errorLayout)
+
 
         # Anim State:
             # 0 = Move box along line
@@ -253,7 +202,15 @@ class packingTaskWindow(QFrame):
         self.animTimer = QTimer()
         self.animTimer.timeout.connect(self.doAnimationStep)
 
+        self.filledArray = []
+        self.unfilledArray = []
+
         self.distToHalfway = 0
+        self.priorState = None
+        self.interrupt = False
+        self.speed = None
+        self.spawnTimer = 0
+
 
     def startStuff(self, speed):
         self.animTimer.start(50)
@@ -261,85 +218,104 @@ class packingTaskWindow(QFrame):
         # Calculates the dist per step required to get to the halfway point for the arm
             # (Width / 2 ) / ( Total Steps )
                 # (Width / 2) / (speed / timestep [50])
-        self.distToHalfway = int(((self.minWidth/2))  / (speed / 50))
+        self.distToHalfway = (self.sceneWidth /2 - self.boxHeight/2)  / (speed / 50)
+        self.speed = speed
 
-    def renderNewBox(self, colour):
-
-        match colour:
-            case "red":
-                boxCol = "#ff0000"
-            case "green":
-                boxCol = "#00ff00"
-            case "blue":
-                boxCol = "#0000ff"
-
-        tempItem = QGraphicsRectItem(0, self.conveyorTopLocation + self.conveyorHeight / 4, self.boxHeight, self.boxHeight)
-        tempItem.setBrush(QBrush(QColor(boxCol)))
+    def distractionFlash(self):
+        self.lightFlash.setVisible(not self.lightFlash.isVisible())                    
+    
+    def renderNewBox(self):
+        tempItem = QGraphicsRectItem(0, 0, self.boxHeight, self.boxHeight)
+        tempItem.setY(self.conveyorTopLocation + self.conveyorHeight / 4)
+        tempItem.setBrush(QBrush(QColor("#fffe00")))
         tempItem.setZValue(500)
-        self.boxArray.append(tempItem)
+        self.unfilledArray.append(tempItem)
         self.scene.addItem(tempItem)
 
     def moveBox(self, disToMovePerMil):
-        for box in self.boxArray:
+        
+        if random.uniform(0.0,1.0) > 0.4 + random.uniform(-0.1,0.1) and self.spawnTimer >= self.speed / 2: 
+            self.spawnTimer = 0
+            self.taskParent.createNewBox()
+        else:
+            self.spawnTimer += 50
+
+        for box in self.unfilledArray:
             box.setX(box.x() + disToMovePerMil)
+    
+        for box in self.filledArray:
+            box.setX(box.x() + disToMovePerMil)
+            if box.x() > self.sceneWidth:
+                self.scene.removeItem(box)
+                self.filledArray.pop(0)
+                self.taskParent.boxList.pop(0)
+
+        # Panic create new box
+        if len(self.unfilledArray) <= 0:
+            print("?")
+            self.taskParent.createNewBox()
 
         # Changes state once the box at the front of the conveyor reaches the halfway point
-        if(self.boxArray[0].x() == self.sceneWidth / 2):
-            self.taskParent.advBoxQueue()
+        if(self.unfilledArray[0].x() >= self.sceneWidth /2):
+            
+            if not self.interrupt:
+                self.taskParent.advBoxQueue()
+            else:
+                self.animState = 2
+                self.priorState = 1
+
+    def removeItem(self, item):
+        childArray = item.childItems()
+        endIndex = len(childArray) - 1
+        self.scene.removeItem(childArray[endIndex])
+
+    def addItem(self, item):
+        newChildNum  = len(item.childItems())
+        self.addBox(item, newChildNum)
+    
+
+    def correctBox(self, action):
+        index = 0
+        for b in self.filledArray:
+            print(self.taskParent.boxList[index])
+            print(str(index))
+            if action == "plus" and self.taskParent.boxList[index] < self.taskParent.itemCount:
+                
+                self.addItem(b)
+                self.taskParent.error -= 1
+                self.taskParent.boxList[index] += 1
+            elif action == "minus" and self.taskParent.boxList[index] > self.taskParent.itemCount:
+                self.removeItem(b)
+                self.taskParent.error -= 1
+                self.taskParent.boxList[index] -= 1
+            index += 1
+    
+  
 
     def doAnimationStep(self):
         match self.animState:
             case 0:
                 self.moveBox(self.distToHalfway)
-            case 1:
-                self.placeholder()
+            case 1: 
+                self.fillBox()
+  
+    def addBox(self, item, position):
+        insideBox = QGraphicsRectItem(0,0, self.boxHeight / 6, self.boxHeight / 6, item)
+        insideBox.setPos(item.boundingRect().topLeft())
+        insideBox.setX(insideBox.x() + ((position % 3)) * self.boxHeight / 3 + self.boxHeight/16)
+        insideBox.setY(insideBox.y() + (math.floor(position/3)) * self.boxHeight / 3 + self.boxHeight/16)
+    
+    def fillBox(self):
+        if len(self.unfilledArray[0].childItems()) == self.taskParent.boxList[len(self.taskParent.boxList) - 1]:
+            self.filledArray.append(self.unfilledArray[0])
+            self.unfilledArray.pop(0)
+            
+            self.animState = 0
+        else: 
+            self.addBox(self.unfilledArray[0], len(self.unfilledArray[0].childItems()))
 
-    def placeholder(self):
-        heldBox = self.boxArray[0]
-        heldBox.setX(heldBox.x() + self.addX)
-        heldBox.setY(heldBox.y() - self.addY)
 
-        if abs(heldBox.y() / 2) >= self.targetY and abs(heldBox.x()) >= self.targetX or self.targetX == 463 and abs(heldBox.y() / 2) >= self.targetY and abs(heldBox.x()) <= self.targetX:
-           self.taskParent.createNewBox()
-           self.boxArray.pop(0)
-           self.taskParent.popBox()
-           if self.toDestroyBox is not None:
-               self.scene.removeItem(self.toDestroyBox)
-               self.toDestroyBox = None
-
-
-    def checkSortBox(self, colour, speed):
-        match(colour):
-            case "blue":
-                self.targetX = self.blueX
-
-                if self.blueSB is not None:
-                    self.toDestroyBox = self.blueSB
-                    self.blueSB = None
-
-                self.blueSB = self.boxArray[0]
-                print("blue")
-                print(self.targetX)
-            case "red":
-                self.targetX = self.redX
-
-                if self.redSB is not None:
-                    self.toDestroyBox = self.redSB
-                    self.redSB = None
-
-                self.redSB = self.boxArray[0]
-
-            case "green":
-                self.targetX = self.greenX
-
-                if self.greenSB is not None:
-                    self.toDestroyBox = self.greenSB
-                    self.greenSB = None
-
-                self.greenSB = self.boxArray[0]
-
-        self.addX = int(((self.targetX - int(self.sceneWidth / 2 - self.boxHeight / 2))) / (speed / 50))
-        self.addY = int(((self.conveyorTopLocation + self.conveyorHeight / 4) - self.targetY)  / (speed / 50))
+        
 
 
 
