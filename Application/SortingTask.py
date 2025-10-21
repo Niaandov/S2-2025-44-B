@@ -45,7 +45,7 @@ class SortingTask(Task):
         self._errorRate = value
 
 
-    def updateTask(self, speed, errorRateVal, numColours, distrataction):
+    def updateTask(self, errorRateVal, speed, numColours, distrataction):
         self._speed = speed
         self._errorRate = errorRateVal
         
@@ -66,7 +66,7 @@ class SortingTask(Task):
         self.renderWindow.renderNewBox(colour)
 
 
-    def pause(self):
+    def stopTimer(self):
         self.renderWindow.animTimer.stop()
     
     def renableTimer(self):
@@ -115,13 +115,10 @@ class SortingTask(Task):
         self.renderWindow.animState = 1
 
     def startTask(self):
+        print("running!")
 
         for i in range(1):
             self.createNewBox()
-
-        #self.stateTimer = QTimer()
-        #self.stateTimer.timeout.connect(self.nextState)
-        #self.stateTimer.start(self._speed)
 
         self.renderWindow.startStuff(self._speed)
 
@@ -279,6 +276,7 @@ class sortingTaskWindow(QFrame):
         # Calculates the dist per step required to get to the halfway point for the arm
             # (Width / 2 ) / ( Total Steps )
                 # (Width / 2) / (speed / timestep [50])
+        print("Current MinWidth: " + str(self.minWidth) + " current speedValue: " + str(speed))
         self.distToHalfway = int(((self.minWidth/2))  / (speed / 50))
 
     def renderNewBox(self, colour):
@@ -299,6 +297,7 @@ class sortingTaskWindow(QFrame):
 
     def moveBox(self, disToMovePerMil):
         for box in self.boxArray:
+            
             box.setX(box.x() + disToMovePerMil)
 
         # Changes state once the box at the front of the conveyor reaches the halfway point
