@@ -15,7 +15,7 @@ import random
 
 from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtGui import QBrush, QColor
-from PyQt5.QtWidgets import QVBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QPushButton, QGraphicsTextItem, QLabel
+from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QPushButton, QGraphicsTextItem, QLabel
 
 from Task import Task
 
@@ -237,8 +237,35 @@ class inspectionTaskWindow(QFrame):
         layout.addWidget(self.statsLabel)
 
         # Controls
+        selectedItemLayout = QHBoxLayout(self)
+
+        self.warningBox = QLabel("")
+        self.warningBox.setStyleSheet("font-weight: bold; color: red")
+        self.warningBox.setAlignment(Qt.AlignCenter)
+        selectedItemLayout.addWidget(self.warningBox)
+        layout.addLayout(selectedItemLayout)
+
         
 
+        errorLabel = QLabel("Bin With Error")
+        errorLabel.setAlignment(Qt.AlignCenter)
+        layout.addWidget(errorLabel)
+
+        errorLayout = QHBoxLayout(self)
+        self.acceptedErrorButton = QPushButton("Accepted")
+        self.acceptedErrorButton.setStyleSheet("background-color: green")
+
+        self.acceptedErrorButton.clicked.connect(lambda: self.correctItem("accepted"))
+
+        errorLayout.addWidget(self.acceptedErrorButton)
+        self.rejectedErrorButton = QPushButton("Rejected")
+        self.rejectedErrorButton.setStyleSheet("background-color: red")
+
+        self.rejectedErrorButton.clicked.connect(lambda: self.correctItem("rejected"))
+
+        errorLayout.addWidget(self.rejectedErrorButton)
+
+        layout.addLayout(errorLayout)
 
         # Animation setup
         self.conveyorItems = []     # Items moving along conveyor
@@ -246,6 +273,7 @@ class inspectionTaskWindow(QFrame):
         self.animTimer = QTimer()
         self.animTimer.timeout.connect(self.doAnimationStep)
         self.animState = 0
+        self.priorState = 0
         
 
         # Pass/fail bin locations
@@ -388,14 +416,21 @@ class inspectionTaskWindow(QFrame):
 
     def correctItem(self, incorrectBox):
 
-        if incorrectBox == "accepted":
-            box = self.acceptedBox[0]
-            targetX, targetY = self.passBinX, self.passBinY 
-        else:
-            box = self.rejectedBox[0]
-            targetX, targetY = self.failBinX, self.failBinY
+        
 
-        refBox = self.box["item"]
+        if incorrectBox == "accepted":
+            if len(self.acceptedBox) <= 0:
+                return
+
+            box = self.acceptedBox[0]
+            targetX, targetY = self.failBinX, self.failBinY
+        else:
+            if len(self.rejectedBox)  <= 0:
+                return
+            box = self.rejectedBox[0]
+            targetX, targetY = self.passBinX, self.passBinY 
+
+        refBox = box["item"]
 
         if not box["error"]:
             print("NO ERROR")
@@ -403,6 +438,7 @@ class inspectionTaskWindow(QFrame):
             
 
         steps = self.speed / 100
+
 
         self.correctingBox = {
             "item": refBox,
@@ -413,8 +449,10 @@ class inspectionTaskWindow(QFrame):
             "steps": steps,
             "currentStep": 0
         }
+        self.priorState = self.animState
+        self.animState = 2
     
-    def moveToTarget(self,box):
+    def moveToTarget(self, box, mode):
                 # Animate items moving to bins
         data = box
 
@@ -427,8 +465,13 @@ class inspectionTaskWindow(QFrame):
             # Finalize position at bin
             item.setX(data["targetX"])
             item.setY(data["targetY"])
-            self.animatedItems.remove(data)
-            self.animState = 0
+            if mode == "inspect":
+                self.animatedItems.remove(data)
+                self.animState = 0
+            elif mode == "correct":
+                self.taskParent.defectsMissed -= 1
+                self.animState = self.priorState
+            
 
 
                 # Adds box to the appropriate pile, and removes the box beneath it
@@ -467,9 +510,9 @@ class inspectionTaskWindow(QFrame):
             case 0:
                 self.moveConveyorItems()
             case 1:
-                self.moveToTarget(self.animatedItems[0])
+                self.moveToTarget(self.animatedItems[0], "inspect")
             case 2:
-                self.moveToTarget(self.correctingBox)
+                self.moveToTarget(self.correctingBox, "correct")
 
     #updates the metrics lables with the correct stats
     def updateStatsLabel(self):
