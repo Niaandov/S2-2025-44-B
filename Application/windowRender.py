@@ -247,6 +247,8 @@ class testWindow(QMainWindow):
         self._last_ocs = dict(eff)
         print(f"[testWindow] OCS settings ({source}, normalized):", eff)
 
+        print(eff)
+
         # If disabled -> immediately remove task & widget and re-enable Start
         if not eff["enabled"]:
             if self.sTask is not None:
@@ -256,8 +258,8 @@ class testWindow(QMainWindow):
         # Enabled and no task -> create (do not auto-start)
         if self.sTask is None:
             try:
-                print("[testWindow] Creating SortingTask:", eff["errorRate"], eff["speed"], eff["numColours"])
-                self.sTask = SortingTask(eff["errorRate"], eff["speed"], eff["numColours"])
+                print("[testWindow] Creating SortingTask:", eff["errorRate"], eff["speed"], eff["numColours"], eff["distractions"])
+                self.sTask = SortingTask(eff["errorRate"], eff["speed"], eff["numColours"], eff["distractions"])
                 if hasattr(self.sTask, "renderWindow") and self.sTask.renderWindow:
                     self.grid.addTaskWidget(self.sTask.renderWindow)
 
@@ -295,6 +297,7 @@ class testWindow(QMainWindow):
         if not self.sTask:
             print("[testWindow] No task. Enable Sorting in OCS to create it first.")
             return
+
 
         # First start
         if not self._taskStartedOnce:

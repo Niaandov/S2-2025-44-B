@@ -15,8 +15,17 @@ class SortingTask(Task):
         self._errorRate = errorRateVal
         self._speed = speed
         self.numColours = numColours
-        self.beeperEnabled = distractions[1]
-        self.flashLightEnabled = distractions[0]
+
+        self.beeperEnabled = False
+        self.flashLightEnabled = False
+
+        for i in distractions:
+            if i == 'sound':
+                self.beeperEnabled = True
+            if i == 'light':
+                self.flashLightEnabled = True
+
+        
 
         self.boxList = []
 
@@ -117,6 +126,11 @@ class SortingTask(Task):
         self.renderWindow.startStuff(self._speed)
         if self.distractionTimer is not None:
             self.distractionTimer.start(500)
+
+    def pause(self):
+        self.renderWindow.animTimer.stop()
+        if self.distractionTimer is not None:
+            self.distractionTimer.stop()
 
 
     def popBox(self):
