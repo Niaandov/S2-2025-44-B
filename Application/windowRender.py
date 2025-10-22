@@ -7,6 +7,8 @@ from PyQt5.QtCore import QTimer
 import sys
 
 from SortingTask import SortingTask
+from inspectionTask import inspectionTask
+from PackingTask import PackagingTask
 from ocs_ui import OCSWindow
 
 
@@ -70,8 +72,11 @@ class testWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Monitoring Window")
         self.resize(1280, 720)
+        
 
         self.sTask = None
+        self.pTask = None
+        self.iTask = None
         self._taskStartedOnce = False
         self._isPaused = False
         self._isRunning = False          # for Start button gating
@@ -207,10 +212,113 @@ class testWindow(QMainWindow):
             "distractions": distractions,
         }
 
+    def _normalizePackaging(self, raw: dict) -> dict:
+            
+            s = dict(raw or {})
+
+            # enabled flag (robust)
+            enabled = None
+            for k in ("packagingEnabled", "enabled"):
+                if k in s:
+                    enabled = bool(s[k]); break
+            if enabled is None:
+                for k, v in s.items():
+                    name = str(k).lower()
+                    if "sort" in name and "enab" in name:
+                        enabled = bool(v)
+                        break
+            if enabled is None:
+                enabled = False
+
+            # error rate (percent or fraction)
+            try:
+                err = float(s.get("errorRate", 0.0))
+                if err > 1.0:
+                    err = err / 100.0
+            except Exception:
+                err = 0.0
+
+            # speed
+            try:
+                speed = int(s.get("speed", 8000))
+            except Exception:
+                speed = 8000
+
+            # colours
+            try:
+                n_raw = int(s.get("packageNum", s.get("packageNum", 4)))
+            except Exception:
+                n_raw = 4
+            num_cols = max(4, n_raw)  # safety for builds that assume >=4
+
+            # distractions
+            distractions = list(s.get("distractions", []))
+
+            return {
+                "enabled": enabled,
+                "errorRate": err,
+                "speed": speed,
+                "packageNum": num_cols,
+                "distractions": distractions,
+            }
+    
+
+    def _normalizeInspection(self, raw: dict) -> dict:
+            
+            s = dict(raw or {})
+
+            # enabled flag (robust)
+            enabled = None
+            for k in ("inspectionEnabled", "enabled"):
+                if k in s:
+                    enabled = bool(s[k]); break
+            if enabled is None:
+                for k, v in s.items():
+                    name = str(k).lower()
+                    if "sort" in name and "enab" in name:
+                        enabled = bool(v)
+                        break
+            if enabled is None:
+                enabled = False
+
+            # error rate (percent or fraction)
+            try:
+                err = float(s.get("errorRate", 0.0))
+                if err > 1.0:
+                    err = err / 100.0
+            except Exception:
+                err = 0.0
+
+            # speed
+            try:
+                speed = int(s.get("speed", 8000))
+            except Exception:
+                speed = 8000
+
+            # colours
+            try:
+                n_raw = int(s.get("sizeRange", s.get("sizeRange", 8)))
+            except Exception:
+                n_raw = 8
+            num_cols = max(8, n_raw)  # safety for builds that assume >=4
+
+            # distractions
+            distractions = list(s.get("distractions", []))
+
+            return {
+                "enabled": enabled,
+                "errorRate": err,
+                "speed": speed,
+                "sizeRange": num_cols,
+                "distractions": distractions,
+            }
+
+
     def _dispose_sorting_task(self):
         """Stop timers, remove widget, drop reference, re-enable Start."""
         if not self.sTask:
             return
+    
 
         # stop anything that looks like a loop/timer
         for name in ("stopTask", "stopTimer", "pauseTimer", "pause"):
@@ -225,11 +333,66 @@ class testWindow(QMainWindow):
             pass
 
         self.sTask = None
-        self._taskStartedOnce = False
+        if self.pTask is None and self.iTask is None:
+            self._taskStartedOnce = False
         self._isPaused = False
         self._isRunning = False
         self._set_start_enabled(True)
         print("[testWindow] SortingTask disposed.")
+
+    def _dispose_packaging_task(self):
+        """Stop timers, remove widget, drop reference, re-enable Start."""
+        if not self.pTask:
+            return
+    
+
+        # stop anything that looks like a loop/timer
+        for name in ("stopTask", "stopTimer", "pauseTimer", "pause"):
+            self._call_if(self.pTask, name)
+
+        # remove render widget
+        try:
+            rw = getattr(self.pTask, "renderWindow", None)
+            if rw is not None:
+                self.grid.removeTaskWidget(rw)
+        except Exception:
+            pass
+
+        self.pTask = None
+        if self.sTask is None and self.iTask is None:
+            self._taskStartedOnce = False
+        self._isPaused = False
+        self._isRunning = False
+        self._set_start_enabled(True)
+        print("[testWindow] PackagingTask disposed.")
+    
+    def _dispose_inspection_task(self):
+        """Stop timers, remove widget, drop reference, re-enable Start."""
+        if not self.iTask:
+            return
+    
+
+        # stop anything that looks like a loop/timer
+        for name in ("stopTask", "stopTimer", "pauseTimer", "pause"):
+            self._call_if(self.iTask, name)
+
+        # remove render widget
+        try:
+            rw = getattr(self.iTask, "renderWindow", None)
+            if rw is not None:
+                self.grid.removeTaskWidget(rw)
+        except Exception:
+            pass
+
+        self.iTask = None
+        if self.pTask is None and self.sTask is None:
+            self._taskStartedOnce = False
+        self._isPaused = False
+        self._isRunning = False
+        self._set_start_enabled(True)
+        print("[testWindow] InspectionTask disposed.")
+
+
 
     def _nudge_resume(self):
         """Gently nudge timers used by some SortingTask builds to actually move."""
@@ -241,25 +404,65 @@ class testWindow(QMainWindow):
             try: rw.update()
             except Exception: pass
 
+    # ---------------- Decipher Size for Individual Task -----------------
+    def calculateTaskSize(self, maxResolution, activeTasks):
+        taskWidth = (maxResolution[0] - (24 + (activeTasks - 1 * 10))) // activeTasks
+        taskHeight = maxResolution[1]
+
+        return [taskWidth, taskHeight]
+
+
     # ---------------- OCS settings handler (LIVE UPDATE) ----------------
     def _apply_settings_from_ocs(self, s: dict, source: str = "settings"):
-        eff = self._normalize(s)
+        eff = self._normalize(s["sortingTask"])
+        effI = self._normalizeInspection(s["inspectionTask"])
+        effP = self._normalizePackaging(s["packagingTask"])
         self._last_ocs = dict(eff)
         print(f"[testWindow] OCS settings ({source}, normalized):", eff)
 
         print(eff)
+        print(effI)
+        print(effP)
 
+        print(s["resolution"])
+
+        taskNum = 0
         # If disabled -> immediately remove task & widget and re-enable Start
         if not eff["enabled"]:
             if self.sTask is not None:
                 self._dispose_sorting_task()
+        else:
+            taskNum += 1
+        
+        if not effI["enabled"]:
+            if self.iTask is not None:
+                self._dispose_inspection_task()
+        else:
+            taskNum += 1
+
+        if not effP["enabled"]:
+            if self.pTask is not None:
+                self._dispose_packaging_task()
+        else:
+            taskNum += 1
+
+        if taskNum == 0:
+            # No tasks exist, so why bother? Get outta here!
             return
 
+        # Calculate resolution for tasks
+        taskResolution = self.calculateTaskSize(s["resolution"], taskNum)
+        self.resize(s["resolution"][0], s["resolution"][1])
+
+        
+        
+
+
         # Enabled and no task -> create (do not auto-start)
-        if self.sTask is None:
+        if self.sTask is None and eff["enabled"]:
             try:
                 print("[testWindow] Creating SortingTask:", eff["errorRate"], eff["speed"], eff["numColours"], eff["distractions"])
-                self.sTask = SortingTask(eff["errorRate"], eff["speed"], eff["numColours"], eff["distractions"])
+                self.sTask = SortingTask(eff["errorRate"], eff["speed"], eff["numColours"], eff["distractions"],taskResolution[0], taskResolution[1])
                 if hasattr(self.sTask, "renderWindow") and self.sTask.renderWindow:
                     self.grid.addTaskWidget(self.sTask.renderWindow)
 
@@ -276,7 +479,26 @@ class testWindow(QMainWindow):
                 print("[testWindow] SortingTask ready; press Start to run.")
             except Exception as e:
                 print("[testWindow] Failed to create SortingTask:", e)
-            return
+
+        if self.iTask is None and effI["enabled"]:
+            print("Getting here, something else is wrong")
+            try:
+                self.iTask = inspectionTask(effI["errorRate"], effI["speed"], effI["sizeRange"], effI["distractions"], taskResolution[0], taskResolution[1])
+                if hasattr(self.iTask, "renderWindow") and self.iTask.renderWindow:
+                    self.grid.addTaskWidget(self.iTask.renderWindow)
+            except Exception as e: 
+                print("[testWindow] Failed to create Inspection Task", e)
+
+
+        if self.pTask is None and effP["enabled"]:
+            try:
+                self.pTask = PackagingTask(effP["errorRate"], effP["speed"], effP["packageNum"], effP["distractions"], taskResolution[0], taskResolution[1])
+                if hasattr(self.pTask, "renderWindow") and self.pTask.renderWindow:
+                    self.grid.addTaskWidget(self.pTask.renderWindow)
+            except Exception as e: 
+                print("[testWindow] Failed to create Packaging Task", e)
+
+
 
         # Enabled and task exists -> **LIVE UPDATE** immediately (as requested)
         try:
@@ -294,54 +516,97 @@ class testWindow(QMainWindow):
     # ---------------- Controls ----------------
     def play(self):
         print("[testWindow] Play clicked")
-        if not self.sTask:
-            print("[testWindow] No task. Enable Sorting in OCS to create it first.")
+        if not self.sTask and not self.iTask and not self.pTask:
+            print("[testWindow] No Tasks enabled")
             return
 
 
         # First start
         if not self._taskStartedOnce:
-            if self._call_if(self.sTask, "startTask"):
-                self._taskStartedOnce = True
-                self._isRunning = True
-                self._isPaused = False
-                self._set_start_enabled(False)    # disable Start while running
-                print("[testWindow] SortingTask started.")
-                # nudge to ensure motion on builds that need it
-                QTimer.singleShot(0, self._nudge_resume)
-                return
+            if self.sTask is not None:
+                if self._call_if(self.sTask, "startTask"):
+                    self._taskStartedOnce = True
+                    self._isRunning = True
+                    self._isPaused = False
+                    self._set_start_enabled(False)    # disable Start while running
+                    print("[testWindow] SortingTask started.")
+                    # nudge to ensure motion on builds that need it
+                    QTimer.singleShot(0, self._nudge_resume)
 
-        # Resume path
-        for name in ("renableTimer", "resumeTimer", "resume"):
-            if self._call_if(self.sTask, name):
-                self._isRunning = True
-                self._isPaused = False
-                self._set_start_enabled(False)
-                print(f"[testWindow] SortingTask resumed via {name}.")
-                QTimer.singleShot(0, self._nudge_resume)
-                return
+            if self.iTask is not None:
+                if self._call_if(self.iTask, "startTask"):
+                    self._taskStartedOnce = True
+                    self._isRunning = True
+                    self._isPaused = False
+                    self._set_start_enabled(False) 
+                    # nudge to ensure motion on builds that need it
+                    QTimer.singleShot(0, self._nudge_resume)
 
-        print("[testWindow] No start/resume method found on SortingTask.")
+            if self.pTask is not None:
+                if self._call_if(self.pTask, "startTask"):
+                    self._taskStartedOnce = True
+                    self._isRunning = True
+                    self._isPaused = False
+                    self._set_start_enabled(False) 
+                    # nudge to ensure motion on builds that need it
+                    QTimer.singleShot(0, self._nudge_resume)
+        else:
+            if self.sTask is not None:
+                if self._call_if(self.sTask, "resume"):
+                    self._isRunning = True
+                    self._isPaused = False
+                    self._set_start_enabled(False)
+
+                    QTimer.singleShot(0, self._nudge_resume)
+
+            if self.iTask is not None:
+                if self._call_if(self.iTask, "resume"):
+                    self._isRunning = True
+                    self._isPaused = False
+                    self._set_start_enabled(False)
+
+                    QTimer.singleShot(0, self._nudge_resume)
+
+            if self.pTask is not None:        
+                if self._call_if(self.pTask, "resume"):
+                    self._isRunning = True
+                    self._isPaused = False
+                    self._set_start_enabled(False)
+                    QTimer.singleShot(0, self._nudge_resume)
 
     def pause(self):
         print("[testWindow] Pause clicked")
         if not self.sTask:
             return
-        for name in ("stopTimer", "pauseTimer", "pauseTask", "pause"):
-            if self._call_if(self.sTask, name):
+
+        if self.sTask is not None:
+            if self._call_if(self.sTask, "pause"):
                 self._isPaused = True
                 self._isRunning = False
-                # keep Start disabled while paused? usually yes; resume should be used
-                # if you want Start re-enabled on pause, change to True here
-                print(f"[testWindow] Pause used {name}()")
-                return
-        print("[testWindow] No pause method found on SortingTask.")
+                print(f"[testWindow] Paused Sorting Task")
+        
+        if self.pTask is not None:
+            if self._call_if(self.pTask, "pause"):
+                self._isPaused = True
+                self._isRunning = False
+                print(f"[testWindow] Paused Packaging Task")
+
+        if self.iTask is not None:
+            if self._call_if(self.iTask, "pause"):
+                self._isPaused = True
+                self._isRunning = False
+                print(f"[testWindow] Paused Inspection Task")
+
+
 
     def stop(self):
         print("[testWindow] Stop clicked")
-        if not self.sTask:
-            return
-        self._dispose_sorting_task()
+        if self.sTask is not None:
+            self._dispose_sorting_task()
+        if self.iTask is not None:
+            self._dispose_inspection_task()
+        if self.pTask is not None:
+            self._dispose_packaging_task()
         print("[testWindow] SortingTask fully stopped and removed.")
 
 

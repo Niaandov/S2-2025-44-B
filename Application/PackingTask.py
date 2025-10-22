@@ -11,7 +11,7 @@ import sys
 from Task import Task
 
 class PackagingTask(Task):
-    def __init__(self, errorRateVal, speed, itemCount, distractions):
+    def __init__(self, errorRateVal, speed, itemCount, distractions,resolutionW,resolutionH):
         self._errorRate = errorRateVal
         self._speed = speed
 
@@ -28,7 +28,7 @@ class PackagingTask(Task):
         self.itemCount = itemCount
 
 
-        self.renderWindow = packagingTaskWindow(1920,1080,self, self.itemCount, self.flashLightEnabled)
+        self.renderWindow = packagingTaskWindow(resolutionW,resolutionH,self, self.itemCount, self.flashLightEnabled)
         self.renderWindow.speed = self._speed
 
         # Plays a beep, cool right?
@@ -83,6 +83,17 @@ class PackagingTask(Task):
 
     def popBox(self):
         self.boxList.pop(0)
+
+    def pause(self):
+        self.renderWindow.animTimer.stop()
+        if self.distractionTimer is not None:
+            self.distractionTimer.stop()
+
+    def resume(self):
+        self.renderWindow.startStuff(self._speed)
+        if self.distractionTimer is not None:
+            self.distractionTimer.start(500)
+
 
 
 

@@ -38,6 +38,7 @@ DISTRACTION_OPTIONS = {
 }
 SORTING_COLOURS = [("2 Colours", 2), ("3 Colours", 3)]
 PACKAGING_SIZES = [("High (6 Items)", 6), ("Medium (5 Items)", 5), ("Low (4 Items)", 4)]
+RESOLUTIONS = [("2560x1440", [2560,1300]), ("1920x1080", [1920,980]), ("1366x768", [1366,668]),("1280x720", [1280,680])]
 
 def combo_from_pairs(pairs):
     cb = QComboBox()
@@ -225,6 +226,8 @@ class OCSWindow(QMainWindow):
     stopClicked  = pyqtSignal()
     settingsChanged = pyqtSignal(dict)
 
+    screenResolution = pyqtSignal()
+
     def __init__(self, taskWindow=None, parent=None):
         super().__init__(parent)
         self.taskWindow = taskWindow
@@ -252,6 +255,11 @@ class OCSWindow(QMainWindow):
         for b in (self.start_btn, self.pause_btn, self.stop_btn):
             b.setCursor(Qt.PointingHandCursor)
 
+        # Screen Size Dropdown
+        self.resolutionDrop = combo_from_pairs(RESOLUTIONS)
+
+
+
         # Hook the buttons to signals (Week-12 binding)
         self.start_btn.clicked.connect(self._on_start_clicked)
         self.pause_btn.clicked.connect(lambda: self.pauseClicked.emit())
@@ -260,6 +268,8 @@ class OCSWindow(QMainWindow):
         # Apply-to-Main (optional explicit button if you want it)
         self.apply_btn = QPushButton("Apply to Main")
         self.apply_btn.clicked.connect(self._emit_settings)
+
+
 
         # Left rail layout
         rail = QVBoxLayout()
@@ -279,6 +289,7 @@ class OCSWindow(QMainWindow):
         rail.addWidget(self.pause_btn)
         rail.addWidget(self.stop_btn)
         rail.addWidget(self.apply_btn)
+        rail.addWidget(self.resolutionDrop)
         rail.addStretch(1)
         rail_w = QWidget(); rail_w.setLayout(rail)
 
@@ -385,16 +396,37 @@ class OCSWindow(QMainWindow):
         self.playClicked.emit()
 
     def _emit_settings(self):
+
         d = self.sorting.to_dict()
+        dPack = self.packaging.to_dict()
+        dInsp = self.inspection.to_dict()
+
         distractions = []
         if d.get("distraction", [False, False])[0]: distractions.append("light")
         if d.get("distraction", [False, False])[1]: distractions.append("sound")
         settings = {
-            "sortingEnabled": bool(d.get("active", False)),
-            "speed": int(d.get("speed", 4000)),              # ms per step
-            "numColours": int(d.get("numColours", 2)),
-            "errorRate": int(d.get("errorRate", 10)),
-            "distractions": distractions,
+            "sortingTask":{
+                "sortingEnabled": bool(d.get("active", False)),
+                "speed": int(d.get("speed", 4000)),              # ms per step
+                "numColours": int(d.get("numColours", 2)),
+                "errorRate": int(d.get("errorRate", 10)),
+                "distractions": distractions,
+            },
+            "packagingTask": {
+                "packagingEnabled": bool(dPack.get("active", False)),
+                "speed": int(dPack.get("speed", 4000)),
+                "errorRate": int(dPack.get("errorRate", 10)),
+                "packageNum": int(dPack.get("packageNum", 4)),
+                "distractions": dPack.get("distraction", [False, False])
+            },
+            "inspectionTask": {
+                "inspectionEnabled": bool(dInsp.get("active", False)),
+                "speed": int(dInsp.get("speed", 4000)),
+                "sizeRange": int(dInsp.get("sizeRange", 8)),
+                "errorRate": int(dInsp.get("errorRate", 10)),
+                "distractions": dInsp.get("distraction", [False, False])
+            },
+            "resolution": self.resolutionDrop.currentData()
         }
         self.settingsChanged.emit(settings)
 

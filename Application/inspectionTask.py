@@ -1,34 +1,28 @@
-"""
-Updates:
-- Made it so that items range from 6cm to 14cm, meaning items outside of 8cm-12cm will auto fail
-- Added labels inside each item so that there is a visual queue of how big the item actually is
-- Added a pause/resume button
-- Added performacne stats on screen updating in real time
-- Added user input. If the user clicks on a box it will reverse the metrics decision 
-        flash yellow and then be removed from the scene.
-- made it so boxes are removed after 5 seconds from being classified to save on system memory.
-"""
-
-
-
 import random
 
 from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtGui import QBrush, QColor
-from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QPushButton, QGraphicsTextItem, QLabel
+from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsEllipseItem, QPushButton, QGraphicsTextItem, QLabel
 
 from Task import Task
+
+import pygame
+import os
+import sys
 
 # -----------------------------------
 # TASK CLASS
 # -----------------------------------
 class inspectionTask(Task):
-    def __init__(self, errorRateVal, speed, acceptedRange):
+    def __init__(self, errorRateVal, speed, acceptedRange, distractions, resolutionW, resolutionH):
         self._errorRate = errorRateVal
         self._speed = speed
         self._acceptedRange = acceptedRange
 
         self.itemList = []
+        
+        self.beeperEnabled = distractions[0]
+        self.flashLightEnabled = distractions[1]
 
         self.correctCount = 0
         self.defectsMissed = 0
@@ -37,7 +31,16 @@ class inspectionTask(Task):
         self.programState = 0
         self.previousState = 0
 
-        self.renderWindow = inspectionTaskWindow(1920, 1080, self)
+        self.renderWindow = inspectionTaskWindow(resolutionW, resolutionH, self, self.flashLightEnabled)
+
+        # Plays a beep, cool right?
+        if self.beeperEnabled:
+            pygame.mixer.init()
+            self.player = pygame.mixer.Sound(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "Sounds\\beep.wav"))
+        
+        if self.flashLightEnabled or self.beeperEnabled:
+            self.distractionTimer = QTimer()
+            self.distractionTimer.timeout.connect(self.doDistraction)
 
     # -------------------------------
     # Properties
@@ -59,11 +62,21 @@ class inspectionTask(Task):
         self._errorRate = value
 
 
+    #--------------------------------
+    # Distraction Logic
+    #--------------------------------
+    def doDistraction(self):
+        if random.uniform(0.0,1.0) > 0.75:
+            if self.beeperEnabled:
+                self.player.play()
+            if self.flashLightEnabled:
+                self.renderWindow.distractionFlash()
+                QTimer.singleShot(500, self.renderWindow.distractionFlash)
+
     # -------------------------------
     # Core Logic
     # -------------------------------
     def createNewBox(self):
-
         self.createNewItem()
 
     def advBoxQueue(self):
@@ -76,6 +89,16 @@ class inspectionTask(Task):
 
     def evaluateItem(self, size):
         return 8.0 <= size <= self._acceptedRange
+
+    def pause(self):
+        self.renderWindow.animTimer.stop()
+        if self.distractionTimer is not None:
+            self.distractionTimer.stop()
+    
+    def resume(self):
+        self.renderWindow.startStuff(self._speed)
+        if self.distractionTimer is not None:
+            self.distractionTimer.start(500)
 
     def performInspection(self):
         if not self.itemList:
@@ -118,6 +141,9 @@ class inspectionTask(Task):
         # Create first item and start the conveyor
         self.createNewItem()
         self.renderWindow.startStuff(self._speed)
+        if self.distractionTimer is not None:
+            self.distractionTimer.start(500)
+
 
 
 
@@ -185,14 +211,22 @@ class inspectionTask(Task):
 # GUI CLASS
 # -----------------------------------
 class inspectionTaskWindow(QFrame):
-    def __init__(self, minWidth, minHeight, taskParent):
+    def __init__(self, minWidth, minHeight, taskParent, flashLight):
         super().__init__()
 
         self.setWindowTitle("Inspection Task Simulation")
 
         self.taskParent = taskParent
         self.sceneWidth = minWidth
-        self.sceneHeight = int(minHeight / 2)
+        self.sceneHeight = int(minHeight/2)
+
+        self.setObjectName("packagingTask")
+        self.setStyleSheet("""QFrame { border: 1px solid #d0d0d0; border-radius: 5px; background: #fafafa;}
+        QLabel { font-size: 4vmin;}
+        QPushButton { padding: 4px 8px;}""")
+
+        self.setMinimumSize(minWidth, minHeight)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         # Scene setup
         self.scene = QGraphicsScene(self)
@@ -209,26 +243,14 @@ class inspectionTaskWindow(QFrame):
 
         # Viewport
         viewport = QGraphicsView(self.scene)
-        viewport.setInteractive(True)
+        viewport.setInteractive(False)
         viewport.setFixedSize(self.sceneWidth, self.sceneHeight)
         viewport.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         viewport.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(12,12,12,12)
+        layout.setSpacing(8)
         layout.addWidget(viewport)
-
-        #start button
-        self.startButton = QPushButton("Start Simulation")
-        layout.addWidget(self.startButton)
-
-        self.startButton.clicked.connect(self.onStartClicked)
-
-        #pause/resume button
-        self.pauseButton = QPushButton("Pause/Resume Simulation")
-        layout.addWidget(self.pauseButton)
-
-        self.pauseButton.clicked.connect(self.onPauseClicked)
-        self.pauseButton.setEnabled(False)
-        
 
         #stats labels
         self.statsLabel = QLabel("Inspected: 0  |  Passed: 0  |  Failed: 0")
@@ -244,6 +266,7 @@ class inspectionTaskWindow(QFrame):
         self.warningBox.setAlignment(Qt.AlignCenter)
         selectedItemLayout.addWidget(self.warningBox)
         layout.addLayout(selectedItemLayout)
+        
 
         
 
@@ -288,41 +311,35 @@ class inspectionTaskWindow(QFrame):
         # Box Spawning 
         self.spawnTimer = 0
 
+        # Flashing Light
+        
+        ####################
+        ## Flashing Light ##
+        ####################
+        if flashLight:
+            lightSize = ((minHeight / 2) / 4) / 2
+            self.lightFlash = QGraphicsEllipseItem(0,0, lightSize * 0.5, lightSize * 0.5)
+            self.lightFlash.setBrush(QBrush(QColor(255,234,0)))
+            self.lightFlash.setX( self.sceneWidth - self.sceneWidth / 16)
+            self.lightFlash.setY(self.sceneHeight / 16)
+            self.scene.addItem(self.lightFlash)
+            self.lightFlash.setVisible(False)
+
 
         # Animation parameters
         self.speed = 0  # default, will be updated by task speed
         self.pixelPerFrame = 2
         self.currentItem = None
 
-    #function for the start button
-    def onStartClicked(self):
-        self.taskParent.startTask()
-        self.startButton.setEnabled(False)
-        self.pauseButton.setEnabled(True)
-        self.animTimer.start(50)
-
-    #function for the pause button
-    def onPauseClicked(self):
-        """Toggle pause/resume for the simulation"""
-        if hasattr(self, "paused") and self.paused:
-            # Resume simulation
-            self.animTimer.start(50)
-            self.pauseButton.setText("Pause Simulation")
-            self.paused = False
-        else:
-            # Pause simulation
-            self.animTimer.stop()
-            if hasattr(self.taskParent, "itemTimer"):
-                self.taskParent.itemTimer.stop()
-            self.pauseButton.setText("Resume Simulation")
-            self.paused = True
-
+    def distractionFlash(self):
+        self.lightFlash.setVisible(not self.lightFlash.isVisible())   
 
 
     def startStuff(self, speed):
         self.speed = speed
         #self.pixelPerFrame = max(1, int(speed * 0.25))  # slower = smoother
         self.pixelPerFrame = int(((self.sceneWidth/2))  / (speed / 50))
+        self.animTimer.start(50)
 
     def renderNewItem(self, size):
         # Compute box size
@@ -361,7 +378,7 @@ class inspectionTaskWindow(QFrame):
         """Move all items along the conveyor and inspect if they reach middle"""
         items_to_inspect = []
 
-        if random.uniform(0.0, 1.0) > 0.4 + random.uniform(-0.5, 0.5) and self.spawnTimer >= 500:
+        if random.uniform(0.0, 1.0) > 0.4 + random.uniform(-0.5, 0.5) and self.spawnTimer >= self.speed / 2:
             self.taskParent.createNewItem()
             self.spawnTimer = 0
         else:

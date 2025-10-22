@@ -11,7 +11,7 @@ import sys
 from Task import Task
 
 class SortingTask(Task):
-    def __init__(self, errorRateVal, speed, numColours, distractions):
+    def __init__(self, errorRateVal, speed, numColours, distractions, resolutionW, resolutionH):
         self._errorRate = errorRateVal
         self._speed = speed
         self.numColours = numColours
@@ -39,7 +39,7 @@ class SortingTask(Task):
         self.correctBox = None
 
 
-        self.renderWindow = sortingTaskWindow(640,1080,self, self.numColours, self.flashLightEnabled)
+        self.renderWindow = sortingTaskWindow(resolutionW,resolutionH,self, self.numColours, self.flashLightEnabled)
         self.renderWindow.speed = self._speed
 
         # Prevents the creation of a kill timer if one exists
@@ -131,6 +131,11 @@ class SortingTask(Task):
         self.renderWindow.animTimer.stop()
         if self.distractionTimer is not None:
             self.distractionTimer.stop()
+
+    def resume(self):
+        self.renderWindow.animTimer.start(50)
+        if self.distractionTimer is not None:
+            self.distractionTimer.start(500)
 
 
     def popBox(self):
