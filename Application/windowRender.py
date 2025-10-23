@@ -195,11 +195,12 @@ class testWindow(QMainWindow):
             speed = 8000
 
         # colours
+        print("IMPORTANT:  " + str(s.get("numColours")))
         try:
             n_raw = int(s.get("numColours", s.get("numColour", 3)))
         except Exception:
             n_raw = 3
-        num_cols = max(3, n_raw)  # safety for builds that assume >=3
+        num_cols = max(2, n_raw)  # safety for builds that assume >=3
 
         # distractions
         distractions = list(s.get("distractions", []))
@@ -333,11 +334,14 @@ class testWindow(QMainWindow):
             pass
 
         self.sTask = None
+        self.OCSWindow.dataManager.setSortingTask(None)
         if self.pTask is None and self.iTask is None:
             self._taskStartedOnce = False
         self._isPaused = False
         self._isRunning = False
         self._set_start_enabled(True)
+
+
         print("[testWindow] SortingTask disposed.")
 
     def _dispose_packaging_task(self):
@@ -359,6 +363,7 @@ class testWindow(QMainWindow):
             pass
 
         self.pTask = None
+        self.OCSWindow.dataManager.setPackagingTask(None)
         if self.sTask is None and self.iTask is None:
             self._taskStartedOnce = False
         self._isPaused = False
@@ -385,6 +390,7 @@ class testWindow(QMainWindow):
             pass
 
         self.iTask = None
+        self.OCSWindow.dataManager.setInspectionTask(None)
         if self.pTask is None and self.sTask is None:
             self._taskStartedOnce = False
         self._isPaused = False
@@ -462,7 +468,7 @@ class testWindow(QMainWindow):
         if self.sTask is None and eff["enabled"]:
             try:
                 print("[testWindow] Creating SortingTask:", eff["errorRate"], eff["speed"], eff["numColours"], eff["distractions"])
-                self.sTask = SortingTask(eff["errorRate"], eff["speed"], eff["numColours"], eff["distractions"],taskResolution[0], taskResolution[1])
+                self.sTask = SortingTask(eff["errorRate"], eff["speed"], eff["numColours"], eff["distractions"],taskResolution[0], taskResolution[1], self.OCSWindow.dataManager)
                 if hasattr(self.sTask, "renderWindow") and self.sTask.renderWindow:
                     self.grid.addTaskWidget(self.sTask.renderWindow)
 
@@ -483,7 +489,7 @@ class testWindow(QMainWindow):
         if self.iTask is None and effI["enabled"]:
             print("Getting here, something else is wrong")
             try:
-                self.iTask = inspectionTask(effI["errorRate"], effI["speed"], effI["sizeRange"], effI["distractions"], taskResolution[0], taskResolution[1])
+                self.iTask = inspectionTask(effI["errorRate"], effI["speed"], effI["sizeRange"], effI["distractions"], taskResolution[0], taskResolution[1], self.OCSWindow.dataManager)
                 if hasattr(self.iTask, "renderWindow") and self.iTask.renderWindow:
                     self.grid.addTaskWidget(self.iTask.renderWindow)
             except Exception as e: 
@@ -492,7 +498,7 @@ class testWindow(QMainWindow):
 
         if self.pTask is None and effP["enabled"]:
             try:
-                self.pTask = PackagingTask(effP["errorRate"], effP["speed"], effP["packageNum"], effP["distractions"], taskResolution[0], taskResolution[1])
+                self.pTask = PackagingTask(effP["errorRate"], effP["speed"], effP["packageNum"], effP["distractions"], taskResolution[0], taskResolution[1], self.OCSWindow.dataManager)
                 if hasattr(self.pTask, "renderWindow") and self.pTask.renderWindow:
                     self.grid.addTaskWidget(self.pTask.renderWindow)
             except Exception as e: 
@@ -519,6 +525,8 @@ class testWindow(QMainWindow):
         if not self.sTask and not self.iTask and not self.pTask:
             print("[testWindow] No Tasks enabled")
             return
+        
+        self.OCSWindow.startCollectionTimer()
 
 
         # First start
@@ -576,8 +584,6 @@ class testWindow(QMainWindow):
 
     def pause(self):
         print("[testWindow] Pause clicked")
-        if not self.sTask:
-            return
 
         if self.sTask is not None:
             if self._call_if(self.sTask, "pause"):
@@ -597,6 +603,8 @@ class testWindow(QMainWindow):
                 self._isRunning = False
                 print(f"[testWindow] Paused Inspection Task")
 
+        self.OCSWindow.stopCollectionTimer("pause")
+
 
 
     def stop(self):
@@ -608,6 +616,8 @@ class testWindow(QMainWindow):
         if self.pTask is not None:
             self._dispose_packaging_task()
         print("[testWindow] SortingTask fully stopped and removed.")
+
+        self.OCSWindow.stopCollectionTimer("stop")
 
 
 # -------------------------------- Entrypoint --------------------------------

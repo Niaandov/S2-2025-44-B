@@ -9,9 +9,10 @@ import os
 import sys 
 
 from Task import Task
+from DataCollection import dataCollection
 
 class SortingTask(Task):
-    def __init__(self, errorRateVal, speed, numColours, distractions, resolutionW, resolutionH):
+    def __init__(self, errorRateVal, speed, numColours, distractions, resolutionW, resolutionH, dataCollector):
         self._errorRate = errorRateVal
         self._speed = speed
         self.numColours = numColours
@@ -24,7 +25,10 @@ class SortingTask(Task):
                 self.beeperEnabled = True
             if i == 'light':
                 self.flashLightEnabled = True
+        
 
+        self.dataCollector = dataCollector
+        self.dataCollector.setSortingTask(self)
         
 
         self.boxList = []
@@ -34,6 +38,12 @@ class SortingTask(Task):
 
         # Sorting Task Specific
         self.error = 0
+        self.fulfilledBoxes = 0
+        self.totalError = 0
+        self.successfulCorrections = 0
+        # One for each bin since multiple bins can have an error in them
+            # RED, GREEN, BLUE
+        self.responseTimer = [0,0,0]
 
         self.errorBox = None
         self.correctBox = None
@@ -57,11 +67,7 @@ class SortingTask(Task):
 
     # Commit exampole
 
-    def createNewBox(self):
-        colour = self.getRandomColour()
-        self.boxList.append(colour)
-        self.renderWindow.animState = 0
-        self.renderWindow.renderNewBox(colour)
+ 
 
     def doDistraction(self):
         if random.uniform(0.0,1.0) > 0.75:
@@ -71,18 +77,36 @@ class SortingTask(Task):
                 self.renderWindow.distractionFlash()
                 QTimer.singleShot(500, self.renderWindow.distractionFlash)
                 
+    #----------------
+    # Data Collection
+    #----------------
+    def returnData(self):
+        print(self.successfulCorrections)
+        return [self.error, self.fulfilledBoxes, self.totalError, self.successfulCorrections]
+        
+
+    def recordResponseTime(self, colour):
+        self.dataCollector.updateResponseTime("sorting", colour)
 
 
+    #===================
+    # Task Functionality
+    #-------------------
 
-
-
+    def createNewBox(self):
+        colour = self.getRandomColour()
+        self.boxList.append(colour)
+        self.renderWindow.animState = 0
+        self.renderWindow.renderNewBox(colour)
 
     def advBoxQueue(self):
         boxLocation = self.boxList[0]
 
         # Checks for an error
         if self.causeError():
+            
             self.error += 1
+            self.totalError += 1
             match self.boxList[0]:
                 case "red":
 
@@ -108,18 +132,11 @@ class SortingTask(Task):
                         boxLocation = 'blue'
                     else:
                         boxLocation = 'red'
-
-
-
- 
-
+        self.dataCollector.writeDictionary(self.dataCollector.createEventDict("task_error", "sorting_task", self.boxList[0] + "_box_sorted_into_" + boxLocation + "_bin"), "event")
         self.renderWindow.checkSortBox(boxLocation, self.boxList[0])
-
-
         self.renderWindow.animState = 1
 
     def startTask(self):
-
         for i in range(1):
             self.createNewBox()
 
@@ -151,13 +168,13 @@ class SortingTask(Task):
 
         match caseNum:
             case 0:
-                return "red"
+                return 'red'
             case 1:
-                return "green"
+                return 'blue'
             case 2:
-                return "blue"
+                return 'green'
             case _:
-                return "blue"
+                return 'blue'
 
 
     def defineErrorBox(self, boxColour):
@@ -318,6 +335,22 @@ class sortingTaskWindow(QFrame):
 
             self.greenX = centreScreenBox
             self.greenY = greenBox.y()
+        else:
+            self.greenX = centreScreenBox
+        
+        arm = QGraphicsEllipseItem(0,0, self.boxHeight/1.25, self.boxHeight/1.25)
+        arm.setX(centreScreenBox + self.boxHeight/4)
+        arm.setBrush(QBrush(QColor(0, 255, 255)))
+        arm.setY(self.conveyorHeight + self.conveyorHeight)
+        arm2 = QGraphicsRectItem(0,0, self.boxHeight/2, self.boxHeight, arm)
+        arm2.setBrush(QBrush(QColor(0, 255, 255)))
+        arm2.setPos(arm.boundingRect().topLeft())
+        arm2.setX(arm2.x() + self.boxHeight/7)
+        arm2.setY(arm2.y() + self.boxHeight/4)
+        arm.setZValue(200)
+        self.scene.addItem(arm)
+
+
 
 
 
@@ -366,6 +399,11 @@ class sortingTaskWindow(QFrame):
         self.errorColour = None
         self.correctedColour = None
         self.speed = None
+
+        self.toDeleteBinCol = None
+        self.errorBins = []
+
+        self.recordingResponseTime = False
 
         ############
         # Controls #
@@ -496,6 +534,14 @@ class sortingTaskWindow(QFrame):
                 self.correctBox(self.errorColour, self.correctedColour)
 
     def doAnimationStep(self):
+        if self.recordingResponseTime:
+            if "green" in self.errorBins:
+                self.taskParent.responseTimer[1] += 50
+            if "blue" in self.errorBins:
+                self.taskParent.responseTimer[2] += 50
+            if "red" in self.errorBins:
+                self.taskParent.responseTimer[0] += 50
+
         match self.animState:
             case 0:
                 self.moveBox(self.distToHalfway)
@@ -517,7 +563,7 @@ class sortingTaskWindow(QFrame):
             self.greenErrorButton.setEnabled(enabled)
 
     def moveToTarget(self):
-        if self.targetX == self.redX and self.heldBox.x() + self.addX > self.targetX:
+        if self.targetX == self.redX and self.heldBox.x() + self.addX > self.targetX  :
             self.addX = self.targetX - self.heldBox.x() 
         elif self.targetX == self.blueX and self.heldBox.x() + self.addX < self.targetX:
             self.addX = self.targetX - self.heldBox.x() 
@@ -532,13 +578,12 @@ class sortingTaskWindow(QFrame):
         self.heldBox.setY(self.heldBox.y() - self.addY)
 
 
-        #print("Current X: " + str(self.heldBox.x()) + ", Target X: " + str(self.targetX) + ", Add X: " + str(self.addX))
-        #print("Current Y: " + str(self.heldBox.y()) + ", Target Y: " + str(self.targetY) + ", Add Y: " + str(self.addY))\
-        print(self.heldBox.y() <= self.targetY and abs(self.heldBox.x()) >= self.targetX)
-        print(self.targetX == self.blueX and self.heldBox.y() <= self.targetY and abs(self.heldBox.x()) <= self.targetX)
+
         
-        if self.heldBox.y() <= self.targetY and abs(self.heldBox.x()) >= self.targetX or self.targetX == self.blueX and self.heldBox.y() <= self.targetY and abs(self.heldBox.x()) <= self.targetX:
+        if self.heldBox.y() <= self.targetY and abs(self.heldBox.x()) >= self.targetX or self.targetX == self.blueX and self.heldBox.y() <= self.targetY and self.heldBox.x() <= self.targetX:
            print("moveToTarget Completed.") 
+
+           
             # If we are not in the interrupt state then move to state 0 
            if not self.interrupt:
                self.taskParent.createNewBox()
@@ -555,8 +600,20 @@ class sortingTaskWindow(QFrame):
 
            # Remove boxes that are hidden or not needed
            if self.toDestroyBox is not None:
-               self.scene.removeItem(self.toDestroyBox)
-               self.toDestroyBox = None
+                if self.toDeleteBinCol in self.errorBins:
+                    if self.toDeleteBinCol == "green":
+                        self.taskParent.responseTimer[1] = 0
+                    if self.toDeleteBinCol == "red":
+                        self.taskParent.responseTimer[0] = 0
+                    if self.toDeleteBinCol == "blue":
+                        self.taskParent.responseTimer[2] = 0
+
+                    self.errorBins.remove(self.toDeleteBinCol)
+                self.scene.removeItem(self.toDestroyBox)
+                self.toDestroyBox = None
+           self.taskParent.fulfilledBoxes += 1
+
+           
 
     def animCorrectBox(self):
         print("We are in Anim CorrectBox. Target X: " + str(self.targetX) + ". Current X: " + str(self.heldBox.x()) + ". ErrorColour and correctedColour: " + str(self.errorColour) + " " + str(self.correctedColour) )
@@ -569,7 +626,7 @@ class sortingTaskWindow(QFrame):
         # Encountered some issue with setting and equalting the position of certain box combos, this is a quick fix for this
         # I'm dead sure its a floating point issue which its why its called that, but if it isnt ah hehe hoho 
         floatingPointErrorSolve = False
-
+        
         if self.targetX == self.redX and self.heldBox.x() + self.addX > self.targetX or self.targetX == self.greenX and self.errorColour == "blue" and self.heldBox.x() + self.addX > self.targetX:
             self.addX = self.targetX - self.heldBox.x() 
         elif self.targetX == self.blueX and self.heldBox.x() + self.addX < self.targetX or self.targetX == self.greenX and self.errorColour == "red" and self.heldBox.x() + self.addX < self.targetX:
@@ -594,7 +651,14 @@ class sortingTaskWindow(QFrame):
             self.errorColour = None
             self.correctColour = None
             self.taskParent.cleanInterruptValues()
+            self.taskParent.successfulCorrections += 1
             self.taskParent.error -= 1
+            
+
+            
+            
+             
+
 
             self.setButtonState(True)
 
@@ -624,10 +688,12 @@ class sortingTaskWindow(QFrame):
                 # If currentBox already has the actual right colour in it (E.G red box in red box). Stop everything and give warning
                 if currentBox == self.redSBCol:
                     self.defineLabel("warning", "No Error present in red box. This can occur if the box is in the process of being replaced by a new box")
+                    self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "sorting_task", "user_attepted_correction_when_no_error_exists_in_red_bin"), "event")
                     self.cleanInterruptState()
                     return
                 if newBox != self.redSBCol:
                     self.defineLabel("warning", "Cannot create an error. This error can also occur if the box is in the process of being replaced by a new box.")
+                    self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "sorting_task", "user_attempted_to_create_a_sorting_error_in_" + newBox + "bin"), "event")
                     self.cleanInterruptState()
                     return
 
@@ -636,10 +702,12 @@ class sortingTaskWindow(QFrame):
             case "green":
                 if currentBox == self.greenSBCol:
                     self.defineLabel("warning", "No Error present in green box. This can occur if the box is in the process of being replaced by a new box")
+                    self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "sorting_task", "user_attepted_correction_when_no_error_exists_in_green_bin"), "event")
                     self.cleanInterruptState()
                     return
                 if newBox != self.greenSBCol:
                     self.defineLabel("warning", "Cannot create an error. This error can also occur if the box is in the process of being replaced by a new box.")
+                    self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "sorting_task", "user_attempted_to_create_a_sorting_error_in_" + newBox + "bin"), "event")
                     self.cleanInterruptState()
                     return
                 self.heldBox = self.greenSB
@@ -647,10 +715,12 @@ class sortingTaskWindow(QFrame):
             case "blue":
                 if currentBox == self.blueSBCol:
                     self.defineLabel("warning", "No Error present in blue box. This can occur if the box is in the process of being replaced by a new box")
+                    self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "sorting_task", "user_attepted_correction_when_no_error_exists_in_blue_bin"), "event")
                     self.cleanInterruptState()
                     return
                 if newBox != self.blueSBCol:
                     self.defineLabel("warning", "Cannot create an error. This error can also occur if the box is in the process of being replaced by a new box.")
+                    self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "sorting_task", "user_attempted_to_create_a_sorting_error_in_" + newBox + "bin"), "event")
                     self.cleanInterruptState()
                     return
                 self.heldBox = self.blueSB
@@ -661,30 +731,52 @@ class sortingTaskWindow(QFrame):
                 self.targetX = self.redX
                 if self.redSB is not None:
                     self.toDestroyBox = self.redSB
+                    self.toDeleteBinCol = 'red'
                 self.redSB = self.heldBox
             case "green":
                 self.targetX = self.greenX
                 if self.greenSB is not None:
                     self.toDestroyBox = self.greenSB
+                    self.toDeleteBinCol = 'green'
                 self.greenSB = self.heldBox
             case "blue":
                 self.targetX = self.blueX
                 if self.blueSB is not None:
                     self.toDestroyBox = self.blueSB
+                    self.toDeleteBinCol = 'blue'
                 self.blueSB = self.heldBox
 
 
 
         # If stuff gets here, we have no errors, so we can disable buttons
         self.setButtonState(False)
+        self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "sorting_task", "user_successfully_corrected_" + newBox + "_item_in_" + currentBox + "bin"), "event")
+        
+        if "blue" == currentBox:
+                self.taskParent.recordResponseTime(self.taskParent.responseTimer[2])
+                self.taskParent.responseTimer[2]
+                if 'blue' in self.errorBins:
+                    self.errorBins.remove('blue')
+
+        if "red" == currentBox:
+                self.taskParent.recordResponseTime(self.taskParent.responseTimer[0])
+                self.taskParent.responseTimer[0]
+                if 'red' in self.errorBins:
+                    self.errorBins.remove('red')
+
+        if "green" == currentBox:
+                self.taskParent.recordResponseTime(self.taskParent.responseTimer[1])
+                self.taskParent.responseTimer[1]
+                if 'green' in self.errorBins:
+                    self.errorBins.remove('green')
+
+
+        
 
         # Mainly placeholder until I can bother to work on proper animations. Animation in this stuff is difficult so Functionality Over Form for now
         # AddY is 0 since we're moving from a box to box and theyre all on the same Y
         self.addX = int(((self.targetX - self.heldBox.x())) / (self.speed / 50))
         self.addY = 0
-
-
-
 
     def checkSortBox(self, colour, boxRealColour):
         match(colour):
@@ -693,16 +785,20 @@ class sortingTaskWindow(QFrame):
 
                 if self.blueSB is not None:
                     self.toDestroyBox = self.blueSB
+                    self.toDeleteBinCol = "blue"
                     self.blueSB = None
 
                 self.blueSB = self.boxArray[0]
                 self.blueSBCol = boxRealColour
+                
+
 
             case "red":
                 self.targetX = self.redX 
 
                 if self.redSB is not None:
                     self.toDestroyBox = self.redSB
+                    self.toDeleteBinCol = "red"
                     self.redSB = None
 
                 self.redSB = self.boxArray[0]
@@ -713,17 +809,23 @@ class sortingTaskWindow(QFrame):
 
                 if self.greenSB is not None:
                     self.toDestroyBox = self.greenSB
+                    self.toDeleteBinCol = "green"
                     self.greenSB = None
 
                 self.greenSB = self.boxArray[0]
                 self.greenSBCol = boxRealColour
+
+        
+        if colour != boxRealColour:
+            self.errorBins.append(colour)
+            
+            self.recordingResponseTime = True
                 
         
         self.heldBox = self.boxArray[0]
         self.addX = int(((self.targetX - int(self.sceneWidth / 2 - self.boxHeight / 2))) / (self.speed / 50))
         self.addY = int(((self.conveyorTopLocation + self.conveyorHeight / 4) - self.targetY)  / (self.speed / 50))
 
-        print("Box X: " + str(self.heldBox.x()) + ", Box Y: " + str(self.heldBox.y()) + ", Target X: " + str(self.targetX) + ", Target Y: " + str(self.targetY))
 
 
 

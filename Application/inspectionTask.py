@@ -5,16 +5,19 @@ from PyQt5.QtGui import QBrush, QColor
 from PyQt5.QtWidgets import QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsEllipseItem, QPushButton, QGraphicsTextItem, QLabel
 
 from Task import Task
+from DataCollection import dataCollection
 
 import pygame
 import os
 import sys
 
+
+
 # -----------------------------------
 # TASK CLASS
 # -----------------------------------
 class inspectionTask(Task):
-    def __init__(self, errorRateVal, speed, acceptedRange, distractions, resolutionW, resolutionH):
+    def __init__(self, errorRateVal, speed, acceptedRange, distractions, resolutionW, resolutionH, dataCollector):
         self._errorRate = errorRateVal
         self._speed = speed
         self._acceptedRange = acceptedRange
@@ -24,14 +27,20 @@ class inspectionTask(Task):
         self.beeperEnabled = distractions[0]
         self.flashLightEnabled = distractions[1]
 
-        self.correctCount = 0
         self.defectsMissed = 0
         self.totalInspected = 0
+        self.totalError = 0
+        self.successfulCorrections = 0
+
+        self.responseTimer = 0
 
         self.programState = 0
         self.previousState = 0
 
         self.renderWindow = inspectionTaskWindow(resolutionW, resolutionH, self, self.flashLightEnabled)
+
+        self.dataCollector = dataCollector
+        self.dataCollector.setInspectionTask(self)
 
         # Plays a beep, cool right?
         if self.beeperEnabled:
@@ -60,6 +69,17 @@ class inspectionTask(Task):
     @errorRate.setter
     def errorRate(self, value):
         self._errorRate = value
+
+    #--------------------------------
+    # Data Return
+    #--------------------------------
+    def returnData(self):
+        return [self.defectsMissed, self.totalInspected, self.totalError, self.successfulCorrections]
+
+    def giveResponseTime(self):
+        self.dataCollector.updateResponseTime( "inspection", self.responseTimer)
+        self.responseTimer = 0
+        return
 
 
     #--------------------------------
@@ -114,23 +134,26 @@ class inspectionTask(Task):
         # Simulate measured result
         if error_happened:
             measured_result = not true_result
+            if measured_result:
+                event = "passed_invalid_item"
+            else:
+                event = "failed_valid_item"
+
+            self.dataCollector.writeDictionary(self.dataCollector.createEventDict("task_error", "inspection_task", "inspection_" + event), "event")
         else:
             measured_result = true_result
 
         # Update metrics
         self.totalInspected += 1
 
-        # Count as correct only when measured matches true
-        if not error_happened:
-            self.correctCount += 1
 
         # Increment whenever a defect is missed.
         if error_happened:
             self.defectsMissed += 1
+            self.totalError += 1
 
         # Update UI
         self.renderWindow.displayInspectionResult(true_result, measured_result)
-        self.renderWindow.updateStatsLabel()
 
         # Remove inspected item from queue
         self.popItem()
@@ -168,9 +191,6 @@ class inspectionTask(Task):
             # Flip to fail
             item.setBrush(QBrush(QColor(255, 0, 0)))
 
-            # Update metrics
-            if self.correctCount > 0:
-                self.correctCount -= 1
             self.defectsMissed += 1
 
         elif current_color == QColor(255, 0, 0):  # red = currently fail
@@ -180,10 +200,8 @@ class inspectionTask(Task):
             # Update metrics
             if self.defectsMissed > 0:
                 self.defectsMissed -= 1
-            self.correctCount += 1
 
         # Refresh stats
-        self.renderWindow.updateStatsLabel()
 
         # Remove the item from the scene after 0.5 seconds
         QTimer.singleShot(500, lambda: item.scene().removeItem(item) if item.scene() else None)
@@ -252,11 +270,21 @@ class inspectionTaskWindow(QFrame):
         layout.setSpacing(8)
         layout.addWidget(viewport)
 
-        #stats labels
-        self.statsLabel = QLabel("Inspected: 0  |  Passed: 0  |  Failed: 0")
-        self.statsLabel.setStyleSheet("color: black; font-size: 18px; font-weight: bold;")
-        self.statsLabel.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.statsLabel)
+        self.boxHeight = int(self.conveyorHeight / 2)
+        centreScreenBox = int(self.sceneWidth /2 - self.boxHeight/2) - + self.boxHeight * 1.15 / 16
+        arm = QGraphicsEllipseItem(0,0, self.boxHeight/1.25, self.boxHeight/1.25)
+        arm.setX(centreScreenBox + self.boxHeight/4)
+        arm.setBrush(QBrush(QColor(0, 255, 255)))
+        arm.setY(self.conveyorHeight + self.conveyorHeight)
+        arm2 = QGraphicsRectItem(0,0, self.boxHeight/2, self.boxHeight, arm)
+        arm2.setBrush(QBrush(QColor(0, 255, 255)))
+        arm2.setPos(arm.boundingRect().topLeft())
+        arm2.setX(arm2.x() + self.boxHeight/7)
+        arm2.setY(arm2.y() + self.boxHeight/4)
+        arm.setZValue(200)
+        self.scene.addItem(arm)
+
+    
 
         # Controls
         selectedItemLayout = QHBoxLayout(self)
@@ -330,6 +358,9 @@ class inspectionTaskWindow(QFrame):
         self.speed = 0  # default, will be updated by task speed
         self.pixelPerFrame = 2
         self.currentItem = None
+
+        # Record Response Time on Anim Step timer
+        self.recordingResponseTime = False
 
     def distractionFlash(self):
         self.lightFlash.setVisible(not self.lightFlash.isVisible())   
@@ -427,7 +458,6 @@ class inspectionTaskWindow(QFrame):
             "currentStep": 0
         })
 
-        self.updateStatsLabel()
 
         self.currentItem = None  # reset for next item
 
@@ -450,11 +480,13 @@ class inspectionTaskWindow(QFrame):
         refBox = box["item"]
 
         if not box["error"]:
+            self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "inspection_task", "attempted_to_correct_non_existent_error"), "event")
             print("NO ERROR")
             return
             
 
         steps = self.speed / 100
+        self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "inspection_task", "corrected_box_from_" + incorrectBox + "_bin"), "event")
 
 
         self.correctingBox = {
@@ -468,6 +500,8 @@ class inspectionTaskWindow(QFrame):
         }
         self.priorState = self.animState
         self.animState = 2
+        self.recordingResponseTime = False
+        self.taskParent.giveResponseTime()
     
     def moveToTarget(self, box, mode):
                 # Animate items moving to bins
@@ -485,8 +519,11 @@ class inspectionTaskWindow(QFrame):
             if mode == "inspect":
                 self.animatedItems.remove(data)
                 self.animState = 0
+                if data["error"]:
+                    self.recordingResponseTime = True
             elif mode == "correct":
                 self.taskParent.defectsMissed -= 1
+                self.taskParent.successfulCorrections += 1
                 self.animState = self.priorState
             
 
@@ -500,6 +537,11 @@ class inspectionTaskWindow(QFrame):
 
                 if len(self.acceptedBox) > 1:
                     oldItem = self.acceptedBox[0]
+
+                    if oldItem["error"]: 
+                        self.recordingResponseTime = False
+                        self.taskParent.responseTimer = 0
+
                     self.removeItemFromScene(oldItem["item"])
                     self.acceptedBox.pop(0)
 
@@ -510,6 +552,12 @@ class inspectionTaskWindow(QFrame):
                 })
                 if len(self.rejectedBox) > 1:
                     oldItem = self.rejectedBox[0]
+                    
+                    # If prior item was an error, erase the recording response timer stuff so we can start over.
+                    if oldItem["error"]: 
+                        self.recordingResponseTime = False
+                        self.taskParent.responseTimer = 0
+
                     self.removeItemFromScene(oldItem["item"])
                     self.rejectedBox.pop(0)
 
@@ -522,7 +570,9 @@ class inspectionTaskWindow(QFrame):
     def doAnimationStep(self):
         """Move conveyor and animate items toward bins"""
         # Move conveyor items
-        print("We are actively in doAnimStep, current animState is: " + str(self.animState))
+        if self.recordingResponseTime:
+            self.taskParent.responseTimer += 50
+
         match self.animState:
             case 0:
                 self.moveConveyorItems()
@@ -531,13 +581,7 @@ class inspectionTaskWindow(QFrame):
             case 2:
                 self.moveToTarget(self.correctingBox, "correct")
 
-    #updates the metrics lables with the correct stats
-    def updateStatsLabel(self):
-        """Refresh the on-screen stats"""
-        inspected = self.taskParent.totalInspected
-        passed = self.taskParent.correctCount
-        failed = self.taskParent.defectsMissed
-        self.statsLabel.setText(f"Inspected: {inspected}  |  Passed: {passed}  |  Failed: {failed}")
+
 
     #removes item from the scene after the 5 seconds QTimer in doAnimationStep
     def removeItemFromScene(self, item):

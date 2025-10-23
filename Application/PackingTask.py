@@ -9,9 +9,10 @@ import os
 import sys 
 
 from Task import Task
+from DataCollection import dataCollection
 
 class PackagingTask(Task):
-    def __init__(self, errorRateVal, speed, itemCount, distractions,resolutionW,resolutionH):
+    def __init__(self, errorRateVal, speed, itemCount, distractions,resolutionW,resolutionH,dataCollector):
         self._errorRate = errorRateVal
         self._speed = speed
 
@@ -25,7 +26,14 @@ class PackagingTask(Task):
 
         # Sorting Task Specific
         self.error = 0
+        self.totalError = 0
+        self.fulfilledPackages = 0
+        self.successfulCorrections = 0
+        self.responseTimer = 0
         self.itemCount = itemCount
+
+        self.dataCollector = dataCollector
+        self.dataCollector.setPackagingTask(self)
 
 
         self.renderWindow = packagingTaskWindow(resolutionW,resolutionH,self, self.itemCount, self.flashLightEnabled)
@@ -54,13 +62,29 @@ class PackagingTask(Task):
             if self.flashLightEnabled:
                 self.renderWindow.distractionFlash()
                 QTimer.singleShot(500, self.renderWindow.distractionFlash)
+
+
+    def returnData(self):
+        return [self.error, self.fulfilledPackages, self.totalError, self.successfulCorrections]
+
+    def recordResponseTime(self):
+        self.dataCollector.updateResponseTime("packaging", self.responseTimer)
+        self.responseTimer = 0
                 
 
     def advBoxQueue(self):
         # Checks for an error
         boxNum = self.itemCount
         if self.causeError():
+            self.error += 1
+            self.totalError += 1
+            self.renderWindow.recordingResponseTime = True
             boxNum = boxNum + self.decideNegative()
+            if boxNum > self.itemCount:
+                issue = "more_items_than_required"
+            if boxNum < self.itemCount:
+                issue = "less_items_then_required"
+            self.dataCollector.writeDictionary(self.dataCollector.createEventDict("task_error", "packaging_task", "box_filled_with_" + issue), "event")
         self.boxList.append(boxNum)
 
         self.renderWindow.animState = 1
@@ -150,6 +174,19 @@ class packagingTaskWindow(QFrame):
         conveyor.setZValue(1)
         self.scene.addItem(conveyor)
 
+        centreScreenBox = int(self.sceneWidth /2 - self.boxHeight/2) - + self.boxHeight * 1.15 / 16
+        arm = QGraphicsEllipseItem(0,0, self.boxHeight/1.25, self.boxHeight/1.25)
+        arm.setX(centreScreenBox + self.boxHeight/4)
+        arm.setBrush(QBrush(QColor(0, 255, 255)))
+        arm.setY(self.conveyorHeight + self.conveyorHeight)
+        arm2 = QGraphicsRectItem(0,0, self.boxHeight/2, self.boxHeight, arm)
+        arm2.setBrush(QBrush(QColor(0, 255, 255)))
+        arm2.setPos(arm.boundingRect().topLeft())
+        arm2.setX(arm2.x() + self.boxHeight/7)
+        arm2.setY(arm2.y() + self.boxHeight/4)
+        arm.setZValue(200)
+        self.scene.addItem(arm)
+
 
         ####################
         ## Flashing Light ##
@@ -222,6 +259,8 @@ class packagingTaskWindow(QFrame):
         self.speed = None
         self.spawnTimer = 0
 
+        self.recordingResponseTime = False
+
 
     def startStuff(self, speed):
         self.animTimer.start(50)
@@ -261,6 +300,14 @@ class packagingTaskWindow(QFrame):
                 self.filledArray.pop(0)
                 self.taskParent.boxList.pop(0)
 
+                # Check if box is error and disable response time, too late bucko
+                index = len(self.taskParent.boxList) - 1
+                if self.taskParent.boxList[index] < self.taskParent.itemCount or self.taskParent.boxList[index] > self.taskParent.itemCount:
+                    self.recordingResponseTime = False
+                    self.taskParent.responseTimer = 0
+
+                self.taskParent.fulfilledPackages += 1
+
         # Panic create new box
         if len(self.unfilledArray) <= 0:
             print("?")
@@ -287,23 +334,42 @@ class packagingTaskWindow(QFrame):
 
     def correctBox(self, action):
         index = 0
+        errorFound = False
         for b in self.filledArray:
             print(self.taskParent.boxList[index])
             print(str(index))
             if action == "plus" and self.taskParent.boxList[index] < self.taskParent.itemCount:
-                
                 self.addItem(b)
                 self.taskParent.error -= 1
+                self.taskParent.successfulCorrections += 1
                 self.taskParent.boxList[index] += 1
+                self.recordingResponseTime = False
+                self.taskParent.recordResponseTime()
+                self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "packaging_task", "box_corrected_by_adding_item"), "event")
+                errorFound = True
+                break
             elif action == "minus" and self.taskParent.boxList[index] > self.taskParent.itemCount:
                 self.removeItem(b)
                 self.taskParent.error -= 1
+                self.taskParent.successfulCorrections += 1
                 self.taskParent.boxList[index] -= 1
+                self.recordingResponseTime = False
+                self.taskParent.recordResponseTime()
+                self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "packaging_task", "box_corrected_by_removing_item"), "event")
+                errorFound = True
+                break
+
             index += 1
+        if not errorFound:
+            self.taskParent.dataCollector.writeDictionary(self.taskParent.dataCollector.createEventDict("user_input", "packaging_task", "attempted_to_correct_a_nonexistent_error"), "event")
+
     
   
 
     def doAnimationStep(self):
+        if self.recordingResponseTime:
+            self.taskParent.responseTimer += 50
+
         match self.animState:
             case 0:
                 self.moveBox(self.distToHalfway)

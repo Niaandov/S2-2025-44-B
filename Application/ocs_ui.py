@@ -15,12 +15,19 @@
 #   }
 
 import os, re, json, glob, sys
-from PyQt5.QtCore import Qt, pyqtSignal
+import matplotlib
+matplotlib.use('Qt5Agg')
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QLineEdit, QPushButton,
     QComboBox, QSlider, QCheckBox, QHBoxLayout, QVBoxLayout, QGridLayout,
-    QGroupBox, QMessageBox, QFormLayout, QFileDialog, QFrame
+    QGroupBox, QMessageBox, QFormLayout, QFileDialog, QFrame, QSpinBox
 )
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+
+from DataCollection import dataCollection
 
 # ---------- Config ----------
 FILENAME_REGEX = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -218,6 +225,17 @@ def stats_panel(title, rows):
     gb.setLayout(form)
     return gb
 
+
+class MPLCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=5, height=5, dpi=100, ylimL=0, ylimU=20):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        self.axes = fig.add_subplot(1,1,1)
+
+        self.axes.set_ylim([ylimL, ylimU])
+
+        super().__init__(fig)
+        
+
 # ---------- MAIN WINDOW ----------
 class OCSWindow(QMainWindow):
     # Week-12: expose signals so window_render.py can bind to them
@@ -258,6 +276,12 @@ class OCSWindow(QMainWindow):
         # Screen Size Dropdown
         self.resolutionDrop = combo_from_pairs(RESOLUTIONS)
 
+        # Data Collection 
+        self.dataManager = dataCollection()
+        self.collectionTimer = QTimer()
+        self.collectionTimer.timeout.connect(self.manifestData)
+        
+
 
 
         # Hook the buttons to signals (Week-12 binding)
@@ -265,10 +289,7 @@ class OCSWindow(QMainWindow):
         self.pause_btn.clicked.connect(lambda: self.pauseClicked.emit())
         self.stop_btn.clicked.connect(lambda: self.stopClicked.emit())
 
-        # Apply-to-Main (optional explicit button if you want it)
-        self.apply_btn = QPushButton("Apply to Main")
-        self.apply_btn.clicked.connect(self._emit_settings)
-
+        self.getParNum = QSpinBox(self)
 
 
         # Left rail layout
@@ -288,8 +309,11 @@ class OCSWindow(QMainWindow):
         rail.addWidget(self.start_btn)
         rail.addWidget(self.pause_btn)
         rail.addWidget(self.stop_btn)
-        rail.addWidget(self.apply_btn)
         rail.addWidget(self.resolutionDrop)
+        rail.addSpacing(10)
+        rail.addWidget(QLabel("Participant Number:"))
+        rail.addWidget(self.getParNum)
+
         rail.addStretch(1)
         rail_w = QWidget(); rail_w.setLayout(rail)
 
@@ -309,30 +333,90 @@ class OCSWindow(QMainWindow):
         # Placeholder stats row (four panels)
         stats_grid = QGridLayout()
         stats_grid.setHorizontalSpacing(18)
-        stats_grid.addWidget(stats_panel("Sorting", [
-            ("Error Rate (observed)", "—"),
-            ("Throughput (60s)", "—"),
-            ("Corrections (G/R/B)", "—"),
-        ]), 0, 0)
-        stats_grid.addWidget(stats_panel("Packaging", [
-            ("Error Rate (observed)", "—"),
-            ("Throughput (60s)", "—"),
-            ("Corrections (#)", "—"),
-        ]), 0, 1)
-        stats_grid.addWidget(stats_panel("Inspection", [
-            ("Error Rate (observed)", "—"),
-            ("Throughput (60s)", "—"),
-            ("Corrections (#)", "—"),
-        ]), 0, 2)
-        stats_grid.addWidget(stats_panel("Participant", [
-            ("Avg. Correctness (%)", "—"),
-            ("Z-Score", "—"),
-            ("Accuracy (%)", "—"),
-        ]), 0, 3)
+
+        # Stats 
+        iGb = QGroupBox('INSPECTION')
+        iForm = QFormLayout()
+        self.iErrorRate = QLabel("—")
+        iForm.addRow("Error Rate (observed)", self.iErrorRate)
+        self.iThroughput = QLabel("—")
+        iForm.addRow("Throughput (Box/s)", self.iThroughput)
+        self.iCorrections = QLabel("—")
+        iForm.addRow("Corrections", self.iCorrections)
+        iGb.setLayout(iForm)
+
+        sGb = QGroupBox('SORTING')
+        sForm = QFormLayout()
+        self.sErrorRate = QLabel("—")
+        sForm.addRow("Error Rate (observed)", self.sErrorRate)
+        self.sThroughput = QLabel("—")
+        sForm.addRow("Throughput (Box/s)", self.sThroughput)
+        self.sCorrections = QLabel("—")
+        sForm.addRow("Corrections", self.sCorrections)
+        sGb.setLayout(sForm)
+
+        pGb = QGroupBox('SORTING')
+        pForm = QFormLayout()
+        self.pErrorRate = QLabel("—")
+        pForm.addRow("Error Rate (observed)", self.pErrorRate)
+        self.pThroughput = QLabel("—")
+        pForm.addRow("Throughput (Box/s)", self.pThroughput)
+        self.pCorrections = QLabel("—")
+        pForm.addRow("Corrections", self.pCorrections)
+        pGb.setLayout(pForm)
+        
+        stats_grid.addWidget(sGb, 0, 0)
+        stats_grid.addWidget(pGb, 0, 1)
+        stats_grid.addWidget(iGb, 0, 2)
 
         # Status line
         self.status_lbl = QLabel("Ready.")
         self.status_lbl.setStyleSheet("color:#666;")
+
+        # Charts !
+        self.xAcc = list(range(10))
+        self.yAccI = [0 for i in range(10)]
+        self.yAccP = [0 for i in range(10)]
+        self.yAccS = [0 for i in range(10)]
+
+        self.xResp = list(range(10))
+        self.yRespI = [0 for i in range(10)]
+        self.yRespP = [0 for i in range(10)]
+        self.yRespS = [0 for i in range(10)]
+
+        self.iAccCanvas = MPLCanvas(self, width=5, height=5, dpi=100,ylimL = 0, ylimU =100)
+        self._iAccRef = None
+
+        self.iRespCanvas = MPLCanvas(self, width=5, height=5, dpi=100,ylimL = 0, ylimU =20)
+        self._iRespRef = None
+
+        self.pAccCanvas = MPLCanvas(self, width=5, height=5, dpi=100,ylimL = 0, ylimU =100)
+        self._pAccRef = None
+
+        self.pRespCanvas = MPLCanvas(self, width=5, height=5, dpi=100,ylimL = 0, ylimU =20)
+        self._pRespRef = None
+
+        self.sAccCanvas = MPLCanvas(self, width=5, height=5, dpi=100,ylimL = 0, ylimU =100)
+        self._sAccRef = None
+
+        self.sRespCanvas = MPLCanvas(self, width=5, height=5, dpi=100,ylimL = 0, ylimU =20)
+
+        self._sRespRef = None
+
+        stats_grid.addWidget(self.sAccCanvas, 1,0)
+        self.updatePlot("sAcc", 0)
+        stats_grid.addWidget(self.sRespCanvas, 1,1)
+        self.updatePlot("sResp", 0)
+        stats_grid.addWidget(self.iAccCanvas, 1,2)
+        self.updatePlot("iAcc", 0)
+        stats_grid.addWidget(self.iRespCanvas, 2,0)
+        self.updatePlot("iResp", 0)
+        stats_grid.addWidget(self.pAccCanvas,2,1)
+        self.updatePlot("pAcc", 0)
+        stats_grid.addWidget(self.pRespCanvas,2,2)
+        self.updatePlot("pResp", 0)
+
+
 
         # Root layout
         root = QWidget()
@@ -348,6 +432,124 @@ class OCSWindow(QMainWindow):
         self.file_combo.clear()
         for p in sorted(glob.glob(SCENARIOS_DIR + "\\" + "*.json")):
             self.file_combo.addItem(p.replace(SCENARIOS_DIR + "\\", ""))
+
+    # ---------- Data Collection -----------
+    def manifestData(self):
+        output = self.dataManager.retrieveMetrics()
+        self.modifyAllMetricDisplay(output)
+        return 
+    
+    def modifyAllMetricDisplay(self, data):
+        if data["sortingTask"] is not None:
+            sMetrics = data["sortingTask"]
+            self.sErrorRate.setText(str(round(sMetrics[1],2)))
+            self.sThroughput.setText(str(round(sMetrics[0],2)))
+            self.sCorrections.setText(str(round(sMetrics[3],2)))
+            if not self.yAccS[-1] == round(sMetrics[2],2):
+                self.updatePlot("sAcc", round(sMetrics[2],2))
+            if not self.yRespS[-1] == round(sMetrics[4],2):
+                self.updatePlot("sResp", round(sMetrics[4],2))
+        if data["packagingTask"] is not None:
+            pMetrics = data["packagingTask"]
+            self.pErrorRate.setText(str(round(pMetrics[1],2)))
+            self.pThroughput.setText(str(round(pMetrics[0],2)))
+            self.pCorrections.setText(str(round(pMetrics[3],2)))
+            if not self.yAccP[-1] == round(pMetrics[2],2):
+                self.updatePlot("pAcc", round(pMetrics[2],2))
+            if not self.yRespP[-1] == round(pMetrics[4],2):
+                self.updatePlot("pReso", round(pMetrics[4],2))
+        if data["inspectionTask"] is not None:
+            iMetrics = data["inspectionTask"]
+            self.iErrorRate.setText(str(round(iMetrics[1],2)))
+            self.iThroughput.setText(str(round(iMetrics[0],2)))
+            self.iCorrections.setText(str(round(iMetrics[3],2)))
+            if not self.yAccI[-1] == round(iMetrics[2],2):
+                self.updatePlot("iAcc", round(iMetrics[2],2))
+            if not self.yRespI[-1] == round(iMetrics[4],2):
+                self.updatePlot("iResp", round(iMetrics[4],2))
+        
+    def updatePlot(self, graph, newData):
+
+        match(graph):
+            case "iAcc":
+                self.iAccCanvas.axes.cla()
+                self.yAccI = self.yAccI[1:] + [newData]
+                if self._iAccRef is None:
+                    plot_refs = self.iAccCanvas.axes.plot(self.xAcc, self.yAccI, 'r')
+                else:
+                    self._iAccRef.set_ydata(self.yAccI)
+                self.iAccCanvas.axes.set_ylim([0,110])
+                self.iAccCanvas.axes.title.set_text("Accuracy | Inspection")
+                self.iAccCanvas.draw()
+            case "iResp":
+                self.iRespCanvas.axes.cla()
+                self.yRespI = self.yRespI[1:] + [newData]
+                if self._iRespRef is None:
+                    plot_refs = self.iRespCanvas.axes.plot(self.xResp, self.yRespI, 'r')
+                   
+                else:
+                    self._iRespRef.set_ydata(self.yRespI)
+                self.iRespCanvas.axes.set_ylim([0,20])
+                self.iRespCanvas.axes.title.set_text("Resp Time. | Inspection")
+                self.iRespCanvas.draw()
+           
+            case "pAcc":
+                self.pAccCanvas.axes.cla()
+                self.yAccP = self.yAccP[1:] + [newData]
+                if self._pAccRef is None:
+                    plot_refs = self.pAccCanvas.axes.plot(self.xAcc, self.yAccP, 'r')
+                    
+                else:
+                    self._pAccRef.set_ydata(self.yAccP)
+                self.pAccCanvas.axes.set_ylim([0,110])
+                self.pAccCanvas.axes.set_xlim([0,10])
+                self.pAccCanvas.axes.title.set_text("Accuracy | Packaging")
+                self.pAccCanvas.draw()
+           
+            case "pResp":
+                self.pRespCanvas.axes.cla()
+                self.yRespP = self.yRespP[1:] + [newData]
+                if self._pRespRef is None:
+                    plot_refs = self.pRespCanvas.axes.plot(self.xResp, self.yRespP, 'r')
+                else:
+                    self._pRespRef.set_ydata(self.yRespP)
+                self.pRespCanvas.axes.set_ylim([0,20])
+                self.pRespCanvas.axes.title.set_text("Resp. Time | Packaging")
+                self.pRespCanvas.draw()
+          
+            case "sAcc":
+                self.sAccCanvas.axes.cla()
+                self.yAccS = self.yAccS[1:] + [newData]
+                if self._sAccRef is None:
+                    plot_refs = self.sAccCanvas.axes.plot(self.xAcc, self.yAccS, 'r')
+                    
+                else:
+                    self._sAccRef.set_ydata(self.yAccS)
+                self.sAccCanvas.axes.set_ylim([0,110])
+                self.sAccCanvas.axes.title.set_text("Accuracy | Sorting")
+                self.sAccCanvas.draw()
+           
+            case "sResp":
+                self.sRespCanvas.axes.cla()
+                self.yRespS = self.yRespS[1:] + [newData]
+                if self._sRespRef is None:
+                    plot_refs = self.sRespCanvas.axes.plot(self.xResp, self.yRespS, 'r')
+                else:
+                    self._sRespRef.set_ydata(self.yRespS)
+                self.sRespCanvas.axes.set_ylim([0,20])
+                self.sRespCanvas.axes.title.set_text("Resp. Time | Sorting")
+                self.sRespCanvas.draw()
+
+    def startCollectionTimer(self):
+        self.collectionTimer.start(1000)
+        
+
+    def stopCollectionTimer(self, pause):
+        if not pause:
+            # Set Session once Task Stopped
+            self.dataManager.getPreviousIDs()
+        
+        self.collectionTimer.stop()
 
     # ---------- save / load ----------
     def save_json(self):
@@ -394,6 +596,7 @@ class OCSWindow(QMainWindow):
         # emit settings first so main creates/updates task, then play
         self._emit_settings()
         self.playClicked.emit()
+        self.dataManager.setNewParticipantID(self.getParNum.value())
 
     def _emit_settings(self):
 
